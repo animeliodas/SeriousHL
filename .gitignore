@@ -1,0 +1,14 @@
+__pycache__/
+*.pyc
+# build outputs
+plugin/build/
+plugin/dist/
+release/
+*.obj
+*.pdb
+*.ilk
+*.exp
+*.lib
+# never game files or Classics Patch's (the installer fetches it)
+*.gro
+*.zip
