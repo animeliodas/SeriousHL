@@ -16,7 +16,7 @@ ROOT = Path(__file__).resolve().parents[1]
 MAIN = (ROOT / "plugin" / "Source" / "Main.cpp").read_text(encoding="utf-8")
 VERSION = ".".join(re.search(r"MakeVersion\((\d+), (\d+), (\d+)\)", MAIN).groups())
 
-README = f"""SeriousHL {VERSION} - Half-Life movement for Serious Sam Classic (The First Encounter, The Second Encounter)
+README = f"""SeriousHL {VERSION} - Half-Life movement and weapons for Serious Sam Classic (The First Encounter, The Second Encounter)
 https://github.com/animeliodas/SeriousHL
 
 Install: double-click Install.cmd. It finds the games in Steam (or GOG; or drop the game's folder on Install.cmd),
@@ -28,6 +28,7 @@ Console (~):
   hl_bAutoJump 1   holding jump hops on every landing (0: a jump per press, as Half-Life)
   hl_bBhopCap 0    no speed cap (1: Steam Half-Life's - over 1.7x 320 u/s a landing jump cuts the speed)
   hl_bEnable 1     Half-Life movement (0: Sam's own)
+  hl_bWeapons 1    Half-Life's weapons on Sam's guns (right mouse button: second fire; 0: Sam's weapons)
   hl_Status()      what it does now
 Uninstall: Uninstall.cmd (Classics Patch stays).
 
@@ -39,7 +40,7 @@ GPL-2.0. Not affiliated with Valve or Croteam.
 RUN_README = f"""SeriousHL {VERSION} RUN - the speedrun build of Half-Life movement for Serious Sam Classic
 https://github.com/animeliodas/SeriousHL
 
-The same movement as SeriousHL {VERSION}, with Half-Life's ruleset fixed: hold jump to hop (autojump), no bunny hop
+The same movement as SeriousHL {VERSION} (the movement only: Sam's weapons stay), with Half-Life's ruleset fixed: hold jump to hop (autojump), no bunny hop
 cap, 100 fps rules, Half-Life's speeds, friction, gravity, ducking and damage pushes. There are no hl_* console
 variables to change and no test hooks. In the bottom left corner the game shows "SeriousHL {VERSION} RUN <8 digits>":
 the first digits of this DLL's SHA-256 (the full one is in SeriousSam_Custom.log) - moderators compare them with the

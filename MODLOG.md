@@ -50,3 +50,27 @@ Route: rules rewritten in the host (pattern "guest's rules headless"), on the Se
     the value is the weapon key slot (5: rocket launcher), not the WeaponType.
 12. `cht_bGod` stops all damage before `DamageImpact`: tests of damage pushes turn it off.
 13. In-game demos are broken in this setup (the user): not used for verification.
+
+## Факты (0.3.0, оружие)
+
+14. Sam's PlayerWeapons (class 402) exports its fire helpers (FireOneBullet, FireBullets, FireMachineBullet,
+    CutWithKnife, FireRocket, FireGrenade, DoRecoil, SetFlare, SpawnRangeSound, ...): calling them on the weapons entity
+    gives Sam's bullets, holes, blood and projectiles with any damage and spread. `FireBullets`' positions are offsets
+    × range × stretch: Half-Life's cone per pellet with stretch 1 and no jitter.
+15. A component's id is `(class << 8) | n` (n as in the .es), e.g. PlayerWeapons' SOUND_COLT_FIRE = (402 << 8) | 37.
+    With the bare n `ComponentForTypeAndID` returns NULL - and Classics Patch's Accessibility plugin patches
+    `CEntity::PlaySound` and dereferences it: a crash inside Accessibility.dll.
+16. Weapon model animations by name at run time (`CAnimObject::GetAnimsCt/GetAnimInfo`): knife PULL, ATTACK01/02;
+    colt FIRE1-3, RELOAD; shotguns FIRE1/FIRE1FAST, FIRE/FIREFAST; tommygun, rocket and grenade launchers, laser FIRE.
+17. Ticks' times are float sums: `t + 0.1` can come out a hair short of two ticks later - compare times with 0.01 s of
+    slack, or a 0.1 s gun fires every 0.15 s.
+18. The client sends an action every frame, more often than the game ticks: test hooks count ticks, and a tick counts
+    only once an action carrying the keys has gone (a console command can land between them).
+19. `PLACT_USE|PLACT_COMPUTER` come together on one press of Sam's "Use/Invoke NETRICSA" (right mouse button), only on
+    the press: a held second fire is read from the key itself (`GetAsyncKeyState`) and those bits are taken out.
+
+## Журнал (0.3.0)
+
+- 2026-10-16: 0.3.0 — Half-Life's weapons on Sam's guns (crowbar, .357, Glock, shotgun, MP5 + grenade, RPG, hand
+  grenades, gauss with charged shot and boost), the core's action filter. Oracles: `test_weapons.py` 5/5 TFE and TSE,
+  `test_hl.py` 10/10 TFE and TSE.

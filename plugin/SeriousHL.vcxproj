@@ -15,6 +15,7 @@
     <ClInclude Include="Source\HlMove.h" />
     <ClInclude Include="Source\Rules.h" />
     <ClInclude Include="Source\Run.h" />
+    <ClInclude Include="Source\Weapons.h" />
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="Source\StdH.cpp">
@@ -24,6 +25,7 @@
     <ClCompile Include="Source\HlMove.cpp" />
     <ClCompile Include="Source\Rules.cpp" />
     <ClCompile Include="Source\Run.cpp" />
+    <ClCompile Include="Source\Weapons.cpp" />
   </ItemGroup>
   <PropertyGroup>
     <!-- the SeriousBridge core (github.com/animeliodas/SeriousBridge): build.sh passes it; by default next to this repo -->

@@ -11,6 +11,7 @@
 #include "StdH.h"
 #include "HlMove.h"
 #include "Run.h"
+#include "Weapons.h"
 #include "Movement.h"
 #include "Player.h"
 #include "Physics.h"
@@ -18,10 +19,10 @@
 
 #include <stdio.h>
 
-#define SERIOUSHL_VERSION "0.2.0"
+#define SERIOUSHL_VERSION "0.3.0"
 
-CLASSICSPATCH_DEFINE_PLUGIN(k_EPluginFlagGame, MakeVersion(0, 2, 0),
-  "SeriousBridge", "SeriousHL", "Half-Life's movement for Serious Sam's player: air strafing, bunny hopping, ducking.");
+CLASSICSPATCH_DEFINE_PLUGIN(k_EPluginFlagGame, MakeVersion(0, 3, 0),
+  "SeriousBridge", "SeriousHL", "Half-Life's movement and weapons for Serious Sam's player.");
 
 // ------------------------------------------------------------------
 // Console
@@ -32,6 +33,7 @@ static void HL_Status(SHELL_FUNC_ARGS) {
   CPrintF("[SeriousHL] %s; %s\n", run::Mark(), hl::Status().str_String);
 #else
   CPrintF("[SeriousHL] %s\n", hl::Status().str_String);
+  CPrintF("[SeriousHL] %s\n", weapons::Status(player::Local()).str_String);
 #endif
 };
 
@@ -62,10 +64,11 @@ static FLOAT hl_fTestPitch = 0.0f;   // the view's pitch held there (degrees, do
 static const ULONG PLACT_FIRE = 1UL << 0; // Player.es
 
 // keys by the tick, "j2,d20,-5,fj10": f b l r (forward, back, left, right), j jump, d duck, - nothing; the number is how
-// many actions they're held
+// many ticks they're held
 struct TestKeys { FLOAT fForward, fSide; BOOL bJump, bDuck; INDEX ctActions; };
 static TestKeys _atkScript[32];
 static INDEX _ctScript = 0, _iScript = 0;
+static BOOL _bFireSent = FALSE, _bScriptSent = FALSE;
 
 static void HL_TestKeys(SHELL_FUNC_ARGS) {
   BEGIN_SHELL_FUNC;
@@ -103,13 +106,92 @@ static void HL_Move(SHELL_FUNC_ARGS) {
   CPrintF("[SeriousHL] player at (%.2f, %.2f, %.2f)\n", pl.pl_PositionVector(1), pl.pl_PositionVector(2), pl.pl_PositionVector(3));
 };
 
+// a Sam monster on the floor ahead as a target: "Boneman" (6 m), "Boneman 1.2"
+static void HL_SpawnTarget(SHELL_FUNC_ARGS) {
+  BEGIN_SHELL_FUNC;
+  const CTString &strArgs = *NEXT_ARG(CTString *);
+  char strName[64] = "";
+  FLOAT fDistance = 6.0f;
+  if (sscanf(strArgs.str_String, "%63s %f", strName, &fDistance) < 1) return;
+  CEntity *pen = player::Local();
+  if (pen == NULL || !_pNetwork->IsServer()) return;
+  FLOATmatrix3D m;
+  MakeRotationMatrixFast(m, ANGLE3D(pen->GetPlacement().pl_OrientationAngle(1), 0, 0));
+  const FLOAT3D vAhead = FLOAT3D(0, 0, -1) * m;
+  CPlacement3D pl(pen->GetPlacement().pl_PositionVector + vAhead * fDistance + FLOAT3D(0, 0.5f, 0),
+    ANGLE3D(pen->GetPlacement().pl_OrientationAngle(1) + 180.0f, 0, 0));
+  try {
+    CEntity *penTarget = IWorld::GetWorld()->CreateEntity_t(pl, CTString("Classes\\") + strName + ".ecl");
+    penTarget->Initialize();
+    CPrintF("[SeriousHL] target %s (%u)\n", strName, penTarget->en_ulID);
+  } catch (char *strError) {
+    CPrintF("[SeriousHL] target: %s\n", strError);
+  }
+};
+
+// what's under the crosshair, and its health
+static void HL_Probe(SHELL_FUNC_ARGS) {
+  BEGIN_SHELL_FUNC;
+  CEntity *pen = player::Local();
+  if (pen == NULL) return;
+  const CPlacement3D plView = IWorld::GetViewpoint((CPlayerEntity *)pen, TRUE);
+  FLOAT3D vDir;
+  AnglesToDirectionVector(plView.pl_OrientationAngle, vDir);
+  CCastRay cr(pen, plView.pl_PositionVector, plView.pl_PositionVector + vDir * 300.0f);
+  cr.cr_ttHitModels = CCastRay::TT_COLLISIONBOX;
+  IWorld::GetWorld()->CastRay(cr);
+  CEntity *penHit = cr.cr_penHit;
+  if (penHit == NULL) {
+    CPrintF("[SeriousHL] probe: nothing\n");
+  } else {
+    const FLOAT fHealth = (penHit->GetFlags() & ENF_ALIVE) ? ((CLiveEntity *)penHit)->en_fHealth : -1.0f;
+    CPrintF("[SeriousHL] probe: %s (%u) at %.2f m, health %.2f\n", penHit->GetClass()->ec_pdecDLLClass->dec_strName,
+      penHit->en_ulID, cr.cr_fHitDistance, fHealth);
+  }
+};
+
+// look at an entity (by id: its middle) and tell its health
+static void HL_Aim(SHELL_FUNC_ARGS) {
+  BEGIN_SHELL_FUNC;
+  const CTString &strId = *NEXT_ARG(CTString *);
+  CEntity *pen = player::Local();
+  CEntity *penTarget = physics::FindEntity((ULONG)atol(strId.str_String));
+  if (pen == NULL || penTarget == NULL) {
+    CPrintF("[SeriousHL] aim: no %s\n", strId.str_String);
+    return;
+  }
+  FLOATaabbox3D box;
+  penTarget->GetBoundingBox(box);
+  const CPlacement3D plView = IWorld::GetViewpoint((CPlayerEntity *)pen, TRUE);
+  FLOAT3D vTo = box.Center() - plView.pl_PositionVector;
+  const FLOAT fDistance = vTo.Length();
+  ANGLE3D aView;
+  DirectionVectorToAngles(vTo.SafeNormalize(), aView);
+  CPlayerEntity *ppl = (CPlayerEntity *)pen;
+  ppl->en_plViewpoint.pl_OrientationAngle(1) = NormalizeAngle(aView(1) - pen->GetPlacement().pl_OrientationAngle(1));
+  ppl->en_plViewpoint.pl_OrientationAngle(2) = aView(2);
+  const FLOAT fHealth = (penTarget->GetFlags() & ENF_ALIVE) ? ((CLiveEntity *)penTarget)->en_fHealth : -1.0f;
+  CPrintF("[SeriousHL] aim: %s (%u) at %.2f m, health %.2f\n", penTarget->GetClass()->ec_pdecDLLClass->dec_strName,
+    penTarget->en_ulID, fDistance, fHealth);
+};
+
+static void HL_DumpAnims(SHELL_FUNC_ARGS) {
+  BEGIN_SHELL_FUNC;
+  weapons::DumpAnims(player::Local());
+};
+
 static void HL_Trace(SHELL_FUNC_ARGS) {
   BEGIN_SHELL_FUNC;
   hl::TraceTicks(NEXT_ARG(INDEX));
 };
 
+// (the hooks count ticks: the client sends an action every frame, more often than the game ticks)
 static void TestTick(CEntity *pen) {
   if (hl_fTestPitch != 0.0f) ((CPlayerEntity *)pen)->en_plViewpoint.pl_OrientationAngle(2) = hl_fTestPitch;
+  // (a tick counts once an action with the keys has gone: a command can come between them)
+  if (hl_iTestFire > 0 && _bFireSent) hl_iTestFire--;
+  if (_iScript < _ctScript && _bScriptSent && --_atkScript[_iScript].ctActions <= 0) _iScript++;
+  _bFireSent = _bScriptSent = FALSE;
   if (hl_iTestTicks <= 0) return;
   hl_iTestTicks--;
   if (hl_fTestTurn != 0.0f) ((CPlayerEntity *)pen)->en_plViewpoint.pl_OrientationAngle(1) += hl_fTestTurn;
@@ -122,11 +204,11 @@ static void TestAction(CPlayerAction &pa, BOOL bFresh) {
   if (_iScript < _ctScript) {
     TestKeys &tk = _atkScript[_iScript];
     pa.pa_vTranslation = FLOAT3D(tk.fSide * 10.0f, tk.bJump ? 11.0f : (tk.bDuck ? -11.0f : 0.0f), -tk.fForward * 10.0f);
-    if (bFresh && --tk.ctActions <= 0) _iScript++;
+    _bScriptSent = TRUE;
   }
-  if (bFresh && hl_iTestFire > 0) {
-    hl_iTestFire--;
+  if (hl_iTestFire > 0) {
     pa.pa_ulButtons |= PLACT_FIRE;
+    _bFireSent = TRUE;
   }
   if (bFresh && hl_iTestSelect > 0) {
     // PLACT_SELECT_WEAPON_SHIFT: 9 in TFE's Player.es, 14 in TSE's
@@ -144,6 +226,13 @@ static void DeclareUsual(void) {
   ClassicsPlugins()->RegisterMethod(TRUE, "void", "hl_Move", "CTString", &HL_Move);
   ClassicsPlugins()->RegisterMethod(TRUE, "void", "hl_Trace", "INDEX", &HL_Trace);
   ClassicsPlugins()->RegisterMethod(TRUE, "void", "hl_TestKeys", "CTString", &HL_TestKeys);
+  ClassicsPlugins()->RegisterMethod(TRUE, "void", "hl_DumpAnims", "void", &HL_DumpAnims);
+  ClassicsPlugins()->RegisterMethod(TRUE, "void", "hl_SpawnTarget", "CTString", &HL_SpawnTarget);
+  ClassicsPlugins()->RegisterMethod(TRUE, "void", "hl_Probe", "void", &HL_Probe);
+  ClassicsPlugins()->RegisterMethod(TRUE, "void", "hl_Aim", "CTString", &HL_Aim);
+  _pShell->DeclareSymbol("persistent user INDEX hl_bWeapons;", &weapons::hl_bWeapons);
+  _pShell->DeclareSymbol("persistent user INDEX hl_iAltFireKey;", &weapons::hl_iAltFireKey);
+  _pShell->DeclareSymbol("user INDEX hl_iTestAlt;", &weapons::hl_iTestAlt);
 
   rules::Settings &s = hl::_settings;
   _pShell->DeclareSymbol("persistent user INDEX hl_bEnable;", &hl::hl_bEnable);
@@ -196,8 +285,11 @@ static void HL_OnFrame(CDrawPort *pdp) {
 };
 
 static void HL_OnPostDraw(CDrawPort *pdp) {
+  if (!GetGameAPI()->IsGameOn()) return;
 #ifdef SERIOUSHL_RUN
-  if (GetGameAPI()->IsGameOn()) run::Draw(pdp);
+  run::Draw(pdp);
+#else
+  weapons::Draw(pdp, player::Local());
 #endif
 };
 
@@ -211,10 +303,16 @@ static void HL_OnPlayerAction(INDEX iClient, INDEX iPlayer, CPlayerAction &pa, I
 
 static void HL_OnWorldLoad(CWorld *pwo, const CTFileName &fnmWorld) {
   hl::Release(); // a new player entity: the next tick takes him from scratch
+#ifndef SERIOUSHL_RUN
+  weapons::Reset();
+#endif
 };
 
 static void HL_OnGameStop(void) {
   hl::Release();
+#ifndef SERIOUSHL_RUN
+  weapons::Reset();
+#endif
 };
 
 CLASSICSPATCH_PLUGIN_STARTUP(HIniConfig props, PluginEvents_t &events) {
@@ -237,6 +335,10 @@ CLASSICSPATCH_PLUGIN_STARTUP(HIniConfig props, PluginEvents_t &events) {
 
   devhook::Init("SERIOUSBRIDGE_DEV");
   const BOOL bHooked = hl::Init();
+#ifndef SERIOUSHL_RUN
+  // (the speedrun build is the movement only, as its category is)
+  if (bHooked) weapons::Init();
+#endif
   CPrintF("^cff8800[SeriousHL]^r %s loaded: Half-Life movement %s (autojump %d, bhop cap %d)\n", SERIOUSHL_VERSION,
     !bHooked ? "unavailable" : hl::hl_bEnable ? "on" : "off", hl::_settings.bAutoJump, hl::_settings.bBhopCap);
 };
