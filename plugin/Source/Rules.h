@@ -1,8 +1,8 @@
 /* SeriousHL - Half-Life's movement rules as one pure step: a tick's input to its output, nothing else read or written.
  *
  * PM_PlayerMove of the Half-Life SDK's pm_shared.c (PM_CategorizePosition, PM_Duck, PM_Jump, PM_PreventMegaBunnyJumping,
- * PM_Friction, PM_Accelerate, PM_AirAccelerate, PM_AddCorrectGravity / PM_FixupGravityVelocity, PM_CheckVelocity) and
- * player.cpp's fall damage, in Half-Life units, at Half-Life's frame rate inside each of Sam's ticks. The game side
+ * PM_Friction, PM_Accelerate, PM_AirAccelerate, PM_AddCorrectGravity / PM_FixupGravityVelocity, PM_CheckVelocity; in
+ * water PM_CheckWater's levels, PM_WaterMove, PM_CheckWaterJump / PM_WaterJump) and player.cpp's fall damage, in Half-Life units, at Half-Life's frame rate inside each of Sam's ticks. The game side
  * (HlMove.cpp) fills the input from Sam's player and applies the output; a run journal records both, and the same
  * build checks a journal by running the step again (Journal.h). The structures are plain 4-byte fields: they go to
  * journals as they are.
@@ -54,6 +54,12 @@ struct Input {
   FLOATmatrix3D mBody;   // the body's rotation
   INDEX bEdge;           // no ground ahead (the edge friction's test, done by the game side)
   FLOAT fFast;           // speed factor (Serious Speed: 2)
+  FLOAT fPitch;          // the view's pitch, degrees (up positive): one swims where one looks
+  FLOAT fWater;          // metres above the bottom of Sam's collision box the water reaches (0: none; 1000: deeper)
+  FLOAT fHeight;         // ...that box's height, metres: Half-Life's hull is put on it - its middle there, the eyes 28
+                         // units over it (Sam's camera swimming is 0.4 m over his box's middle)
+  INDEX bWallAhead;      // PM_CheckWaterJump's traces (by the game side): a near vertical wall 24 units ahead at 8
+  FLOAT3D vWallNormal;   //   above the box's middle, nothing at 36 over it (the hull's top) - and that wall's normal
 };
 
 // What the rules keep from tick to tick (pmove->oldbuttons, the duck's state).
@@ -62,6 +68,8 @@ struct Memory {
   INDEX bDucked;         // FL_DUCKING
   INDEX bInDuck;         // ducking on the ground, not done yet
   FLOAT fDuckLeft;
+  FLOAT fWaterJump;      // pmove->waterjumptime, seconds
+  FLOAT3D vWaterJump;    // pmove->movedir, u/s
 };
 
 struct Output {
@@ -71,7 +79,13 @@ struct Output {
   FLOAT fFallDamage;     // to inflict now
   FLOAT fFall;           // u/s he landed with (0: didn't)
   FLOAT fSpeed;          // u/s, horizontal, at the end
+  INDEX iWaterLevel;     // PM_CheckWater at the end: 0 dry, 1 feet, 2 waist, 3 eyes
+  INDEX bWaterJump;      // jumped out of the water at a ledge
 };
+// PM_CheckWater's points (units): 1 over the feet, the hull's middle, the eyes over the middle (VEC_VIEW 28 standing,
+// VEC_DUCK_VIEW 12 ducked); PM_CheckWaterJump's traces over the middle and ahead
+static const FLOAT WATER_FEET = 1.0f, WATER_EYES = 28.0f, WATER_EYES_DUCKED = 12.0f;
+static const FLOAT WATERJUMP_AT = 8.0f, WATERJUMP_TOP = 36.0f, WATERJUMP_AHEAD = 24.0f;
 
 void Step(const Settings &s, const Input &in, Memory &mem, Output &out);
 

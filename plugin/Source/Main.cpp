@@ -11,6 +11,7 @@
 #include "StdH.h"
 #include "Hev.h"
 #include "HlMove.h"
+#include "Rules.h"
 #include "Run.h"
 #include "Weapons.h"
 #include "Movement.h"
@@ -36,6 +37,9 @@ static void HL_Status(SHELL_FUNC_ARGS) {
   CPrintF("[SeriousHL] %s\n", hl::Status().str_String);
   CPrintF("[SeriousHL] %s\n", weapons::Status(player::Local()).str_String);
   CPrintF("[SeriousHL] %s\n", hev::Status().str_String);
+  CEntity *pen = player::Local();
+  const FLOAT *pfArmor = pen != NULL ? (FLOAT *)player::Prop(pen, player::PROP_ARMOR) : NULL;
+  if (pen != NULL) CPrintF("[SeriousHL] health %.1f, armour %.1f\n", ((CLiveEntity *)pen)->en_fHealth, pfArmor != NULL ? *pfArmor : 0.0f);
 #endif
 };
 
@@ -177,6 +181,218 @@ static void HL_Aim(SHELL_FUNC_ARGS) {
     penTarget->en_ulID, fDistance, fHealth);
 };
 
+// --- water: the level's biggest swimmable sector (levels here have gravity down -y)
+static CBrushSector *BiggestWater(FLOATaabbox3D &boxWater) {
+  CWorld *pwo = IWorld::GetWorld();
+  FLOAT fBest = 0.0f;
+  CBrushSector *pbscBest = NULL;
+  FOREACHINDYNAMICCONTAINER(pwo->wo_cenEntities, CEntity, iten) {
+    if (iten->GetRenderType() != CEntity::RT_BRUSH || iten->en_pbrBrush == NULL) continue;
+    CBrushMip *pbm = iten->en_pbrBrush->GetFirstMip();
+    if (pbm == NULL) continue;
+    FOREACHINDYNAMICARRAY(pbm->bm_abscSectors, CBrushSector, itbsc) {
+      const INDEX iContent = itbsc->GetContentType();
+      if (iContent == 0 || iContent >= pwo->wo_actContentTypes.Count()) continue;
+      if (!(pwo->wo_actContentTypes[iContent].ct_ulFlags & CTF_SWIMABLE)) continue;
+      const FLOAT3D vSize = itbsc->bsc_boxBoundingBox.Size();
+      const FLOAT fVolume = vSize(1) * vSize(2) * vSize(3);
+      if (fVolume > fBest) {
+        fBest = fVolume;
+        boxWater = itbsc->bsc_boxBoundingBox;
+        pbscBest = &*itbsc;
+      }
+    }
+  }
+  return pbscBest;
+};
+
+static BOOL InSector(CBrushSector *pbsc, const FLOAT3D &v) {
+  const DOUBLE3D vD = FLOATtoDOUBLE(v);
+  const DOUBLEbspnode3D *pbn = pbsc->bsc_bspBSPTree.bt_pbnRoot;
+  while (pbn != NULL && pbn->bn_bnlLocation == BNL_BRANCH) pbn = pbn->PointDistance(vD) >= 0.0 ? pbn->bn_pbnFront : pbn->bn_pbnBack;
+  return pbn != NULL && pbn->bn_bnlLocation == BNL_INSIDE;
+};
+
+// how far a ray goes before it hits a brush (the whole world tested: no entity to start from)
+static FLOAT Clear(const FLOAT3D &vFrom, const FLOAT3D &vDir, FLOAT fMax, CBrushPolygon **ppbpo = NULL) {
+  CCastRay cr(NULL, vFrom, vFrom + vDir * fMax);
+  cr.cr_ttHitModels = CCastRay::TT_NONE;
+  cr.cr_bHitPortals = cr.cr_bHitTranslucentPortals = FALSE;
+  cr.cr_bPhysical = TRUE;
+  IWorld::GetWorld()->CastRay(cr);
+  if (ppbpo != NULL) *ppbpo = cr.cr_pbpoBrushPolygon;
+  return cr.cr_penHit != NULL ? cr.cr_fHitDistance : fMax;
+};
+
+static void Place(CEntity *pen, const FLOAT3D &vFeet, ANGLE aHeading) {
+  const CPlacement3D pl(vFeet, ANGLE3D(aHeading, 0, 0));
+  ((CPlayerEntity *)pen)->en_plViewpoint.pl_OrientationAngle = ANGLE3D(0, 0, 0);
+  const FLOAT3D vStill(0, 0, 0);
+  physics::PlaceNow(pen, pl, &vStill);
+};
+
+// in the biggest water, the feet this deep under its top ("2.5"; "-8": over it), at its most open spot (room around,
+// under and over), facing its longest way
+static void HL_GoWater(SHELL_FUNC_ARGS) {
+  BEGIN_SHELL_FUNC;
+  const CTString &strArgs = *NEXT_ARG(CTString *);
+  CEntity *pen = player::Local();
+  FLOATaabbox3D box;
+  FLOAT fDepth = 2.5f;
+  sscanf(strArgs.str_String, "%f", &fDepth);
+  CBrushSector *pbsc = pen != NULL ? BiggestWater(box) : NULL;
+  if (pbsc == NULL) {
+    CPrintF("[SeriousHL] water: none\n");
+    return;
+  }
+  const FLOAT fTop = box.Max()(2);
+  const FLOAT3D vUp(0, 1, 0);
+  FLOAT fBest = -1.0f, fBestHeading = 0.0f;
+  FLOAT3D vBest(0, 0, 0);
+  for (INDEX ix = 1; ix < 7; ix++) {
+    for (INDEX iz = 1; iz < 7; iz++) {
+      const FLOAT3D vFeet(Lerp(box.Min()(1), box.Max()(1), ix / 7.0f), fTop - fDepth, Lerp(box.Min()(3), box.Max()(3), iz / 7.0f));
+      // in the water there (deep under it: from the surface down)
+      const FLOAT3D vInWater = fDepth > 0.0f ? vFeet + vUp * 0.05f : FLOAT3D(vFeet(1), fTop - 0.3f, vFeet(3));
+      if (!InSector(pbsc, vInWater)) continue;
+      const FLOAT fDown = Min(Clear(vInWater, -vUp, 6.0f), 6.0f);
+      const FLOAT fUp = fDepth < 0.0f ? Clear(vInWater, vUp, -fDepth + 3.0f) : 3.0f;
+      if (fDepth < 0.0f && fUp < -fDepth + 2.5f) continue;
+      FLOAT fRound = 1e6f, fLongest = 0.0f, fHeading = 0.0f;
+      for (INDEX i = 0; i < 8; i++) {
+        const FLOAT a = i * 45.0f;
+        const FLOAT3D vDir(-Sin(a), 0, -Cos(a));
+        const FLOAT fWay = Clear(vInWater + vUp * 1.0f, vDir, 16.0f);
+        fRound = Min(fRound, fWay);
+        if (fWay > fLongest) {
+          fLongest = fWay;
+          fHeading = a;
+        }
+      }
+      const FLOAT fScore = Min(fDown, 4.0f) + Min(fRound, 4.0f) + fLongest * 0.2f;
+      if (fScore > fBest) {
+        fBest = fScore;
+        vBest = vFeet;
+        fBestHeading = fHeading;
+      }
+    }
+  }
+  if (fBest < 0.0f) {
+    CPrintF("[SeriousHL] water: no spot\n");
+    return;
+  }
+  Place(pen, vBest, fBestHeading);
+  CPrintF("[SeriousHL] water: box %.1f %.1f %.1f - %.1f %.1f %.1f, feet at %.2f %.2f %.2f, heading %.0f, in water %d\n",
+    box.Min()(1), box.Min()(2), box.Min()(3), box.Max()(1), box.Max()(2), box.Max()(3), vBest(1), vBest(2), vBest(3),
+    fBestHeading, InSector(pbsc, vBest + vUp * 0.05f));
+};
+
+// waist deep at the biggest water's wall that has room over it (Half-Life's water jump), facing it; the wall looked
+// for this deep under the surface ("0.1")
+static INDEX _bEdgeDebug = FALSE;
+static void HL_WaterEdge(SHELL_FUNC_ARGS) {
+  BEGIN_SHELL_FUNC;
+  const CTString &strArgs = *NEXT_ARG(CTString *);
+  FLOAT fUnder = 0.1f;
+  sscanf(strArgs.str_String, "%f", &fUnder);
+  CEntity *pen = player::Local();
+  FLOATaabbox3D box;
+  if (pen == NULL || BiggestWater(box) == NULL) {
+    CPrintF("[SeriousHL] water edge: no water\n");
+    return;
+  }
+  const FLOAT fUnit = hl::_settings.fUnit;
+  const FLOAT fTop = box.Max()(2);
+  // waist deep: the wall's trace (8 units over his box's middle) just under the surface - the water between the middle
+  // and the eyes 28 units over it
+  const CCollisionInfo *pci = pen->en_pciCollisionInfo;
+  const FLOAT fBoxMiddle = pci != NULL ? (pci->ci_fMinHeight + pci->ci_fMaxHeight) * 0.5f : 0.9f;
+  const FLOAT fFeetY = fTop - fUnder - rules::WATERJUMP_AT * fUnit - fBoxMiddle;
+  if (_bEdgeDebug) CPrintF("  water edge: top %.2f, feet %.2f, box %.2f..%.2f, centre %.2f %.2f %.2f\n", fTop, fFeetY,
+    pci != NULL ? pci->ci_fMinHeight : 0.0f, pci != NULL ? pci->ci_fMaxHeight : 0.0f, box.Center()(1), box.Center()(2), box.Center()(3));
+  const FLOAT3D vC = box.Center();
+  // (rays go through the sectors from those of the entity they're cast for: he goes to the water first)
+  Place(pen, FLOAT3D(vC(1), fFeetY, vC(3)), pen->GetPlacement().pl_OrientationAngle(1));
+  FLOAT fBest = 1e6f;
+  FLOAT3D vBestFeet(0, 0, 0), vBestDir(0, 0, 0);
+  for (INDEX i = 0; i < 32; i++) {
+    const FLOAT a = i * 360.0f / 32;
+    const FLOAT3D vDir(-Sin(a), 0, -Cos(a));
+    // the wall at the waist (8 over the middle), from the middle of the water
+    const FLOAT fMiddle = fFeetY + fBoxMiddle;
+    const FLOAT3D vFrom(vC(1), fMiddle + rules::WATERJUMP_AT * fUnit, vC(3));
+    const FLOAT fTopAt = fMiddle + rules::WATERJUMP_TOP * fUnit;
+    CCastRay cr(pen, vFrom, vFrom + vDir * 200.0f);
+    cr.cr_ttHitModels = CCastRay::TT_NONE;
+    cr.cr_bHitPortals = cr.cr_bHitTranslucentPortals = FALSE;
+    cr.cr_bPhysical = TRUE;
+    IWorld::GetWorld()->CastRay(cr);
+    if (cr.cr_penHit == NULL || cr.cr_pbpoBrushPolygon == NULL) { if (_bEdgeDebug) CPrintF("  %d: no wall\n", i); continue; }
+    const FLOAT3D vN = FLOAT3D(cr.cr_pbpoBrushPolygon->bpo_pbplPlane->bpl_plAbsolute);
+    if (Abs(vN(2)) >= 0.1f || (vN % vDir) > -0.7f) { if (_bEdgeDebug) CPrintF("  %d: wall at %.2f not upright (%.2f %.2f %.2f)\n", i, cr.cr_fHitDistance, vN(1), vN(2), vN(3)); continue; }
+    const FLOAT fWall = cr.cr_fHitDistance;
+    // nothing at the hull's top, a good way past the wall
+    const FLOAT3D vFromTop(vC(1), fTopAt, vC(3));
+    CCastRay crTop(pen, vFromTop, vFromTop + vDir * (fWall + 1.5f));
+    crTop.cr_ttHitModels = CCastRay::TT_NONE;
+    crTop.cr_bHitPortals = crTop.cr_bHitTranslucentPortals = FALSE;
+    crTop.cr_bPhysical = TRUE;
+    IWorld::GetWorld()->CastRay(crTop);
+    if (crTop.cr_penHit != NULL) { if (_bEdgeDebug) CPrintF("  %d: wall at %.2f, the top blocked at %.2f\n", i, fWall, crTop.cr_fHitDistance); continue; }
+    // (and room to stand up over the ledge: a hull's height more over that)
+    const FLOAT3D vFromOver(vC(1), fTopAt + 72.0f * fUnit, vC(3));
+    if (Clear(vFromOver, vDir, fWall + 1.5f) < fWall + 1.5f) { if (_bEdgeDebug) CPrintF("  %d: wall at %.2f, no room over the ledge\n", i, fWall); continue; }
+    // a spot 0.6 m from the wall, its floor under the feet
+    const FLOAT3D vFeet = FLOAT3D(vC(1), fFeetY, vC(3)) + vDir * (fWall - 0.6f);
+    CCastRay crDown(pen, vFeet + FLOAT3D(0, 0.1f, 0), vFeet - FLOAT3D(0, 1.0f, 0));
+    crDown.cr_ttHitModels = CCastRay::TT_NONE;
+    crDown.cr_bHitPortals = crDown.cr_bHitTranslucentPortals = FALSE;
+    crDown.cr_bPhysical = TRUE;
+    IWorld::GetWorld()->CastRay(crDown);
+    if (crDown.cr_penHit != NULL || !movement::PointInWater(pen, vFeet)) { if (_bEdgeDebug) CPrintF("  %d: wall at %.2f, floor %d water %d\n", i, fWall, crDown.cr_penHit != NULL, movement::PointInWater(pen, vFeet)); continue; }
+    if (fWall < fBest) {
+      fBest = fWall;
+      vBestFeet = vFeet;
+      vBestDir = vDir;
+    }
+  }
+  if (fBest >= 1e6f) {
+    CPrintF("[SeriousHL] water edge: no wall with room over it\n");
+    return;
+  }
+  ANGLE3D aDir;
+  DirectionVectorToAngles(vBestDir, aDir);
+  Place(pen, vBestFeet, aDir(1));
+  CPrintF("[SeriousHL] water edge: feet at %.2f %.2f %.2f, the surface %.2f m over them, the wall %.2f m ahead\n",
+    vBestFeet(1), vBestFeet(2), vBestFeet(3), fTop - vBestFeet(2), 0.6f);
+};
+
+// the water around him: the engine's own view (contents, immersion over its collision box) and the points tested
+static void HL_WaterProbe(SHELL_FUNC_ARGS) {
+  BEGIN_SHELL_FUNC;
+  CEntity *pen = player::Local();
+  if (pen == NULL) return;
+  CMovableEntity *pmen = (CMovableEntity *)pen;
+  CWorld *pwo = pen->GetWorld();
+  const FLOAT3D vFeet = pen->GetPlacement().pl_PositionVector;
+  CPrintF("[SeriousHL] water probe: feet y %.3f; engine: up %d (flags %x), down %d (flags %x), immersion %.3f, box %.3f..%.3f; above feet %.3f m\n",
+    vFeet(2), pmen->en_iUpContent, pwo->wo_actContentTypes[pmen->en_iUpContent].ct_ulFlags, pmen->en_iDnContent,
+    pwo->wo_actContentTypes[pmen->en_iDnContent].ct_ulFlags, pmen->en_fImmersionFactor,
+    pen->en_pciCollisionInfo != NULL ? pen->en_pciCollisionInfo->ci_fMinHeight : -1.0f,
+    pen->en_pciCollisionInfo != NULL ? pen->en_pciCollisionInfo->ci_fMaxHeight : -1.0f, movement::WaterAbove(pen, 3.0f));
+  CTString str;
+  for (INDEX i = 0; i <= 12; i++) str += movement::PointInWater(pen, vFeet + FLOAT3D(0, i * 0.25f, 0)) ? "W" : ".";
+  CPrintF("[SeriousHL] water probe: 0..3 m by 0.25: %s\n", str.str_String);
+  {FOREACHSRCOFDST(pen->en_rdSectors, CBrushSector, bsc_rsEntities, pbsc)
+    const INDEX iContent = pbsc->GetContentType();
+    const FLOATaabbox3D &box = pbsc->bsc_boxBoundingBox;
+    const CContentType &ct = pwo->wo_actContentTypes[iContent];
+    CPrintF("[SeriousHL]   sector '%s' content %d '%s' (flags %x, density %.0f, swim damage %.1f every %.1f s, drowning %.1f), first mip %d, y %.2f..%.2f\n",
+      pbsc->bsc_strName.str_String, iContent, ct.ct_strName.str_String, ct.ct_ulFlags, ct.ct_fDensity, ct.ct_fSwimDamageAmount,
+      ct.ct_tmSwimDamageFrequency, ct.ct_fDrowningDamageAmount, pbsc->bsc_pbmBrushMip->IsFirstMip(), box.Min()(2), box.Max()(2));
+  ENDFOR;}
+};
+
 static void HL_DumpAnims(SHELL_FUNC_ARGS) {
   BEGIN_SHELL_FUNC;
   weapons::DumpAnims(player::Local());
@@ -242,6 +458,10 @@ static void DeclareUsual(void) {
   ClassicsPlugins()->RegisterMethod(TRUE, "void", "hl_Probe", "void", &HL_Probe);
   ClassicsPlugins()->RegisterMethod(TRUE, "void", "hl_Aim", "CTString", &HL_Aim);
   ClassicsPlugins()->RegisterMethod(TRUE, "void", "hl_TestDamage", "CTString", &HL_TestDamage);
+  ClassicsPlugins()->RegisterMethod(TRUE, "void", "hl_GoWater", "CTString", &HL_GoWater);
+  ClassicsPlugins()->RegisterMethod(TRUE, "void", "hl_WaterEdge", "CTString", &HL_WaterEdge);
+  _pShell->DeclareSymbol("user INDEX hl_bEdgeDebug;", &_bEdgeDebug);
+  ClassicsPlugins()->RegisterMethod(TRUE, "void", "hl_WaterProbe", "void", &HL_WaterProbe);
   _pShell->DeclareSymbol("persistent user INDEX hl_bWeapons;", &weapons::hl_bWeapons);
   _pShell->DeclareSymbol("persistent user INDEX hl_iAltFireKey;", &weapons::hl_iAltFireKey);
   _pShell->DeclareSymbol("persistent user INDEX hl_bHevArmor;", &hev::hl_bHevArmor);

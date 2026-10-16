@@ -27,6 +27,29 @@ static FLOAT _fSpeed = 0.0f, _fTopSpeed = 0.0f, _fLastFall = 0.0f;
 static BOOL _bGround = FALSE;
 static ULONG _ctPushes = 0;
 static FLOAT _fLastPush = 0.0f;
+static INDEX _iWater = 0;
+static ULONG _ctWaterJumps = 0;
+static CSymbolPtr _symViewHeightStand;
+
+// Models/Player/SeriousSam/Player.h
+static const INDEX PLAYER_BOX_STAND = 0;
+
+// Sam swims in a box around his middle (1.5 m) with his camera 0.4 m over it, and switches to it and back as the water
+// rises past half of the box he's in - the middle jumping by most of a metre each time. Half-Life's player keeps his
+// hull and his eyes in water: so does Sam while the rules move him (if the standing box fits there), his camera at the
+// standing height; Sam's swimming state, its animation and breathing stay.
+static void KeepStanding(CEntity *pen, movement::State &st) {
+  const INDEX iState = player::PropIndex(pen, player::PROP_STATE, player::PST_STAND);
+  if (iState != player::PST_SWIM && iState != player::PST_DIVE) return;
+  CMovableModelEntity *pmme = (CMovableModelEntity *)pen;
+  if (pmme->en_iCollisionBox != PLAYER_BOX_STAND && !pmme->ChangeCollisionBoxIndexNow(PLAYER_BOX_STAND)) return;
+  pmme->en_iWantedCollisionBox = PLAYER_BOX_STAND;
+  if (!_symViewHeightStand.Exists()) _symViewHeightStand.Find("plr_fViewHeightStand");
+  ((CPlayerEntity *)pen)->en_plViewpoint.pl_PositionVector(2) = _symViewHeightStand.Exists() ? _symViewHeightStand.GetFloat() : 1.9f;
+  const CCollisionInfo *pci = pen->en_pciCollisionInfo;
+  st.fWater = movement::WaterAbove(pen, 3.0f);
+  if (pci != NULL) st.fHeight = pci->ci_fMaxHeight - pci->ci_fMinHeight;
+};
 
 // PM_Friction's edge test: Half-Life traces the player's box 16 units ahead, 34 down - no ground under it, twice the
 // friction. Here rays from the feet: under them, 16 and 32 units ahead, and 16 to each side half way.
@@ -52,6 +75,35 @@ static BOOL AtEdge(CEntity *pen, const FLOAT3D &v, const FLOAT3D &vUp) {
   return TRUE;
 };
 
+// PM_CheckWaterJump's traces: a point 8 units over the hull's middle and one at its top (36 over it), 24 units ahead
+// along the view (flat) - a near vertical wall in front of the first, nothing in front of the second. The hull's
+// middle: Sam's collision box's.
+static BOOL WallAhead(CEntity *pen, const movement::State &st, FLOAT3D &vNormal) {
+  const FLOAT fUnit = _settings.fUnit;
+  const FLOAT3D vAhead = movement::Wish(pen, st, 1.0f, 0.0f, 1.0f);
+  const CCollisionInfo *pci = pen->en_pciCollisionInfo;
+  const FLOAT fMiddle = pci != NULL ? (pci->ci_fMinHeight + pci->ci_fMaxHeight) * 0.5f : 0.9f;
+  const FLOAT3D vMiddle = pen->GetPlacement().pl_PositionVector + st.vUp * fMiddle;
+  const FLOAT afUp[2] = { rules::WATERJUMP_AT, rules::WATERJUMP_TOP };
+  for (INDEX i = 0; i < 2; i++) {
+    const FLOAT3D vFrom = vMiddle + st.vUp * (afUp[i] * fUnit);
+    CCastRay cr(pen, vFrom, vFrom + vAhead * (rules::WATERJUMP_AHEAD * fUnit));
+    cr.cr_ttHitModels = CCastRay::TT_NONE;
+    cr.cr_bHitPortals = FALSE;
+    cr.cr_bHitTranslucentPortals = FALSE;
+    cr.cr_bPhysical = TRUE;
+    pen->GetWorld()->CastRay(cr);
+    if (i == 0) {
+      if (cr.cr_penHit == NULL || cr.cr_pbpoBrushPolygon == NULL) return FALSE;
+      vNormal = FLOAT3D(cr.cr_pbpoBrushPolygon->bpo_pbplPlane->bpl_plAbsolute);
+      if (Abs(vNormal % st.vUp) >= 0.1f) return FALSE;
+    } else if (cr.cr_penHit != NULL) {
+      return FALSE;
+    }
+  }
+  return TRUE;
+};
+
 static void Trace(CEntity *pen, const FLOAT3D &vEnd, BOOL bGround, BOOL bJumped) {
   if (_ctTrace <= 0) return;
   if (_fTrace == NULL) {
@@ -65,13 +117,13 @@ static void Trace(CEntity *pen, const FLOAT3D &vEnd, BOOL bGround, BOOL bJumped)
       _ctTrace = 0;
       return;
     }
-    fprintf(_fTrace, "tick,x,y,z,vx,vy,vz,ground,jumped,hspeed_u,ducked\n");
+    fprintf(_fTrace, "tick,x,y,z,vx,vy,vz,ground,jumped,hspeed_u,ducked,water\n");
   }
   const FLOAT3D vPos = pen->GetPlacement().pl_PositionVector;
   const FLOAT3D vUp = -((CMovableEntity *)pen)->en_vGravityDir;
   const FLOAT fH = (vEnd - vUp * (vEnd % vUp)).Length() / _settings.fUnit;
-  fprintf(_fTrace, "%.2f,%.4f,%.4f,%.4f,%.4f,%.4f,%.4f,%d,%d,%.2f,%d\n", _pTimer->CurrentTick(), vPos(1), vPos(2), vPos(3),
-    vEnd(1), vEnd(2), vEnd(3), bGround ? 1 : 0, bJumped ? 1 : 0, fH, _mem.bDucked ? 1 : 0);
+  fprintf(_fTrace, "%.2f,%.4f,%.4f,%.4f,%.4f,%.4f,%.4f,%d,%d,%.2f,%d,%d\n", _pTimer->CurrentTick(), vPos(1), vPos(2), vPos(3),
+    vEnd(1), vEnd(2), vEnd(3), bGround ? 1 : 0, bJumped ? 1 : 0, fH, _mem.bDucked ? 1 : 0, _iWater);
   if (--_ctTrace <= 0) {
     fclose(_fTrace);
     _fTrace = NULL;
@@ -88,7 +140,8 @@ void TraceTicks(INDEX ctTicks) {
 };
 
 // The rules (movement::Rules): every tick, right before the engine moves him.
-static BOOL Rules(CEntity *pen, const movement::State &st, movement::Result &res) {
+static BOOL Rules(CEntity *pen, const movement::State &stWorld, movement::Result &res) {
+  movement::State st = stWorld;
   if (!hl_bEnable) {
     // (traced too: tests compare with Sam's own movement)
     const CMovableEntity *pmen = (CMovableEntity *)pen;
@@ -96,6 +149,7 @@ static BOOL Rules(CEntity *pen, const movement::State &st, movement::Result &res
     return FALSE;
   }
 
+  KeepStanding(pen, st);
   rules::Input in;
   in.tmTick = _pTimer->TickQuantum;
   in.vVelocity = st.vVelocity;
@@ -116,6 +170,12 @@ static BOOL Rules(CEntity *pen, const movement::State &st, movement::Result &res
   in.bEdge = st.bGround && _settings.fEdgeFriction != 1.0f && AtEdge(pen, st.vVelocity, st.vUp);
   // Serious Speed (TSE): twice as fast, as Sam's own with it
   in.fFast = player::PowerupLeft(pen, player::PU_SERIOUSSPEED) > 0.0f ? 2.0f : 1.0f;
+  in.fPitch = st.fPitch;
+  in.fWater = st.fWater;
+  in.fHeight = st.fHeight;
+  in.bWallAhead = FALSE;
+  in.vWallNormal = FLOAT3D(0, 0, 0);
+  if (st.fWater > 0.0f && st.fWater < movement::WATER_DEEP) in.bWallAhead = WallAhead(pen, st, in.vWallNormal);
 
   rules::Output out;
   rules::Step(_settings, in, _mem, out);
@@ -134,6 +194,12 @@ static BOOL Rules(CEntity *pen, const movement::State &st, movement::Result &res
   if (out.bDucktap) _ctDucktaps++;
   if (in.bEdge && out.bGround) _ctEdges++;
   if (out.fFall > 0.0f) _fLastFall = out.fFall;
+  if (out.bWaterJump) {
+    _ctWaterJumps++;
+    CPrintF(SB_TAG " water jump: the wall's normal %.2f %.2f %.2f, pushed at %.0f u/s\n", in.vWallNormal(1), in.vWallNormal(2),
+      in.vWallNormal(3), _mem.vWaterJump.Length());
+  }
+  _iWater = out.iWaterLevel;
   _bGround = out.bGround;
   _fSpeed = out.fSpeed;
   _fTopSpeed = Max(_fTopSpeed, _fSpeed);
@@ -185,6 +251,8 @@ BOOL Init(void) {
   } else {
     CPrintF(SB_TAG " (CPlayer::DamageImpact isn't in the Entities library: damage pushes stay Sam's)\n");
   }
+  // (in water too: Half-Life's swimming)
+  movement::TakeWater(TRUE);
   return movement::Init(&Rules);
 };
 
@@ -195,9 +263,10 @@ void Release(void) {
 
 CTString Status(void) {
   CTString str;
-  str.PrintF("%s; %s; speed %.0f u/s (top %.0f), %s, %u jumps, %u ducktaps, ducked %d, %u ticks at an edge, last fall %.0f u/s, %u damage pushes (last %.0f u/s); autojump %d, bhop cap %d, %d fps, 1 u = %.4f m",
+  str.PrintF("%s; %s; speed %.0f u/s (top %.0f), %s, water level %d, %u jumps, %u water jumps, %u ducktaps, ducked %d, %u ticks at an edge, last fall %.0f u/s, %u damage pushes (last %.0f u/s); autojump %d, bhop cap %d, %d fps, 1 u = %.4f m",
     hl_bEnable ? "Half-Life movement" : "Sam's movement (hl_bEnable 0)", movement::Status().str_String, _fSpeed, _fTopSpeed,
-    _bGround ? "on the ground" : "in the air", _ctJumps, _ctDucktaps, _mem.bDucked, _ctEdges, _fLastFall, _ctPushes, _fLastPush,
+    _bGround ? "on the ground" : "in the air", _iWater, _ctJumps, _ctWaterJumps, _ctDucktaps, _mem.bDucked, _ctEdges, _fLastFall,
+    _ctPushes, _fLastPush,
     _settings.bAutoJump, _settings.bBhopCap, _settings.iFps, _settings.fUnit);
   return str;
 };

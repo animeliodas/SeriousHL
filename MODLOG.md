@@ -128,5 +128,25 @@ Route: rules rewritten in the host (pattern "guest's rules headless"), on the Se
     going off when stuck), debris collision (only brushes stop it, nothing sets it off), 150 over 2.5 × 150 units.
     Crossbow: TSE's `FireSniperBullet`, 50 (`sk_plr_xbow_bolt_monster`), from the view's middle while scoped.
 33. Rare flake: once in four runs the gauss's single shot counted 40 on the target (twice 20).
+34. Water (the core takes it with `movement::TakeWater`): Half-Life's `PM_CheckWater` tests points - so does the core,
+    against the BSP of the swimmable sectors the player is in (a point's side of each split plane down to an inside or
+    outside leaf). The engine's own fluid physics (MovableEntity.es PreMovingNew): buoyancy = 1 - contents' densities
+    over the player's (Player.es: 500 swimming at the surface, 1000 diving) by immersion; swimming (buoyancy x gravity
+    < 0.5 in swimmable content) pulls the whole velocity towards the top sinking/floating speed by at most
+    buoyancy x gravity a tick - inverted exactly (given that much less towards it); fluid friction and control are the
+    acceleration and deceleration, zero. Contents are last tick's (TestFields runs inside PreMoving, after the patch).
+35. Sam swims in another box: SWIM/SWIMSMALL (index 2/3, -0.75..+0.75 m around his position, camera 0.4 over it;
+    diving 0.0), standing 0..2.25 m (camera 1.9). He switches when the water passes half the box he's in: the middle
+    jumps by most of a metre. While the rules move him in water he keeps the standing box (if it fits) and the
+    standing camera - Half-Life's hull is 72 units (2.14 m), its eyes 64 over the feet.
+36. `CCastRay` with an origin entity walks the sectors from that entity's: a ray from far away misses everything.
+    `CCastRay(NULL, ...)` tests the whole world (slow: a test hook doing ~2000 of them stalled the game past the
+    watchdog's 5 s).
+37. Pools: TFE 12_Karnak (open, 15 m deep), 14_SacredYards, 09_Sewers; TSE LevelsMP/2_1_Ziggurrat (10 m), 1_1_Palenque.
+    Karnak's banks have a lip under the water; HL's water jump needs a near vertical wall at 8 units over the hull's
+    middle and nothing at its top.
 - 2026-10-16: egon (minigun), satchel (cannon), crossbow (TSE sniper); the HL sounds really heard (3D parameters).
   `test_weapons.py` 10/10 TSE; TFE 9/9 + crossbow n/a.
+- 2026-10-16: Half-Life's swimming (the speedrun build too): water levels, PM_WaterMove, the jump up, the water jump,
+  no fall damage into water. `test_water.py` 6/6 TFE (Karnak) and TSE (Ziggurrat; the water jump in Palenque);
+  `test_hl.py` 11/11 TFE and TSE.

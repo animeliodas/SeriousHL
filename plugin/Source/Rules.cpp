@@ -23,6 +23,14 @@ static const FLOAT WALKABLE_NORMAL = 0.7f;             // ...steeper is in the a
 static const FLOAT PLAYER_MAX_SAFE_FALL_SPEED = 580.0f;
 static const FLOAT PLAYER_FATAL_FALL_SPEED = 1024.0f;
 static const FLOAT DAMAGE_FOR_FALL_SPEED = 100.0f / (PLAYER_FATAL_FALL_SPEED - PLAYER_MAX_SAFE_FALL_SPEED);
+// water
+static const FLOAT WATER_SINK = 60.0f;          // PM_WaterMove: no keys, drifting to the bottom
+static const FLOAT WATER_WISH = 0.8f;           // ...slower than on land
+static const FLOAT WATER_JUMP_UP = 100.0f;      // PM_Jump in water (CONTENTS_WATER)
+static const FLOAT WATERJUMP_UP = 225.0f;       // PM_CheckWaterJump
+static const FLOAT WATERJUMP_PUSH = 50.0f;      // ...against the wall
+static const FLOAT WATERJUMP_TIME = 2.0f;       // ...2000 ms
+static const FLOAT WATERJUMP_MIN_UP = -180.0f;  // ...not when going down faster (just jumped in)
 
 static void CheckVelocity(const Settings &s, FLOAT3D &v) {
   for (INDEX i = 1; i <= 3; i++) v(i) = Clamp(v(i), -s.fMaxVelocity, s.fMaxVelocity);
@@ -59,11 +67,44 @@ static void PreventMegaBunnyJumping(FLOAT3D &v, FLOAT fMaxSpeed) {
   v *= (fMaxScaled / fSpeed) * 0.65f;
 };
 
+// PM_CheckWater: 0 dry, 1 the feet, 2 the hull's middle, 3 the eyes under water (fWater over the box's bottom, units)
+static INDEX WaterLevel(FLOAT fWater, FLOAT fMiddle, BOOL bDucked) {
+  if (fWater <= WATER_FEET) return 0;
+  if (fWater <= fMiddle) return 1;
+  if (fWater <= fMiddle + (bDucked ? WATER_EYES_DUCKED : WATER_EYES)) return 2;
+  return 3;
+};
+
+// PM_WaterMove's velocity: the wish (the keys along the view, its pitch too) at 0.8 of it, water friction on the whole
+// velocity, the acceleration to the wish's speed
+static void WaterMove(const Settings &s, FLOAT3D &v, const FLOAT3D &vWish, BOOL bKeys, const FLOAT3D &vUp, FLOAT fMaxSpeed,
+    FLOAT tmFrame) {
+  FLOAT3D vWishVel = vWish;
+  if (!bKeys) vWishVel -= vUp * WATER_SINK;
+  FLOAT fWishSpeed = vWishVel.Length();
+  if (fWishSpeed > fMaxSpeed) {
+    vWishVel *= fMaxSpeed / fWishSpeed;
+    fWishSpeed = fMaxSpeed;
+  }
+  fWishSpeed *= WATER_WISH;
+  const FLOAT fSpeed = v.Length();
+  FLOAT fNewSpeed = 0.0f;
+  if (fSpeed > 0.0f) {
+    fNewSpeed = Max(fSpeed - tmFrame * fSpeed * s.fFriction, 0.0f);
+    v *= fNewSpeed / fSpeed;
+  }
+  if (fWishSpeed < 0.1f) return;
+  const FLOAT fAddSpeed = fWishSpeed - fNewSpeed;
+  if (fAddSpeed <= 0.0f) return;
+  const FLOAT fAccelSpeed = Min(s.fAccelerate * fWishSpeed * tmFrame, fAddSpeed);
+  v += vWishVel.SafeNormalize() * fAccelSpeed;
+};
+
 // The keys relative to the view as it was at fAt of the tick (0 its start, 1 now), absolute: as Player.es turns its
 // keys by the view (relative to the body), and the engine the body's to absolute.
-static FLOAT3D Wish(const Input &in, FLOAT fForward, FLOAT fSide, FLOAT fAt) {
+static FLOAT3D Wish(const Input &in, FLOAT fForward, FLOAT fSide, FLOAT fAt, FLOAT fPitch = 0.0f) {
   FLOATmatrix3D mView;
-  MakeRotationMatrixFast(mView, ANGLE3D(in.fView - in.fTurn * (1.0f - fAt), 0.0f, 0.0f));
+  MakeRotationMatrixFast(mView, ANGLE3D(in.fView - in.fTurn * (1.0f - fAt), fPitch, 0.0f));
   const FLOAT3D vRelative = FLOAT3D(fSide, 0.0f, -fForward) * mView;
   return vRelative * in.mBody;
 };
@@ -81,11 +122,18 @@ void Step(const Settings &s, const Input &in, Memory &mem, Output &out) {
 
   // PM_CategorizePosition
   BOOL bGround = in.bGround && (in.vNormal % vUp) >= WALKABLE_NORMAL && (v % vUp) <= ON_GROUND_MAX_RISE;
+  // PM_CheckWater: the water above the bottom of his box as he moves up and down through the tick (none at the
+  // tick's start: none in it - where the surface is isn't known)
+  const FLOAT fWater = in.fWater / fUnit;
+  const FLOAT fMiddle = in.fHeight * 0.5f / fUnit;
+  FLOAT fRise = 0.0f;
+  #define WATER_NOW (fWater > 0.0f ? WaterLevel(fWater - fRise, fMiddle, mem.bDucked) : 0)
+  const INDEX iWaterStart = WATER_NOW;
 
-  // player.cpp: landing too fast hurts
+  // player.cpp: landing too fast hurts - not in water
   if (in.fLanding > 0.0f) {
     out.fFall = in.fLanding / fUnit;
-    if (s.bFallDamage && out.fFall > PLAYER_MAX_SAFE_FALL_SPEED) {
+    if (s.bFallDamage && iWaterStart == 0 && out.fFall > PLAYER_MAX_SAFE_FALL_SPEED) {
       out.fFallDamage = (out.fFall - PLAYER_MAX_SAFE_FALL_SPEED) * DAMAGE_FOR_FALL_SPEED;
     }
   }
@@ -123,8 +171,8 @@ void Step(const Settings &s, const Input &in, Memory &mem, Output &out) {
   }
   mem.bOldDuck = bDuckKey;
 
-  // PM_Jump - before friction: a jump on the tick he lands keeps all of his speed (bunny hopping)
-  if (in.bJump && bGround && (s.bAutoJump || !mem.bOldJump)) {
+  // PM_Jump - before friction: a jump on the tick he lands keeps all of his speed (bunny hopping); in water, below
+  if (in.bJump && bGround && iWaterStart < 2 && (s.bAutoJump || !mem.bOldJump)) {
     if (s.bBhopCap) PreventMegaBunnyJumping(v, fMaxSpeed);
     v = v - vUp * (v % vUp) + vUp * Sqrt(2.0f * JUMP_GRAVITY * s.fJumpHeight);
     bGround = FALSE;
@@ -148,12 +196,54 @@ void Step(const Settings &s, const Input &in, Memory &mem, Output &out) {
   FLOAT3D vMoved(0, 0, 0);
   for (INDEX iFrame = 0; iFrame < ctFrames; iFrame++) {
     // the view turns through the tick as the mouse turned it
-    const FLOAT3D vWishVel = Wish(in, fForward, fSide, (FLOAT)(iFrame + 1) / ctFrames);
+    const FLOAT fAt = (FLOAT)(iFrame + 1) / ctFrames;
+    const FLOAT3D vWishVel = Wish(in, fForward, fSide, fAt);
     FLOAT fWishSpeed = vWishVel.Length();
     const FLOAT3D vWishDir = fWishSpeed > 0.001f ? vWishVel / fWishSpeed : FLOAT3D(0, 0, 0);
     if (fWishSpeed > fMaxSpeed) fWishSpeed = fMaxSpeed;
+    const INDEX iWater = WATER_NOW;
+    const FLOAT3D vBefore = vMoved;
 
-    if (bGround) {
+    if (mem.fWaterJump > 0.0f) {
+      // PM_WaterJump: out over the ledge - pushed at the wall, half the gravity (the move returns before the other
+      // half), until its time is up or he's out of the water
+      if (iWater < 2) v -= vUp * (fGravity * tmFrame * 0.5f);
+      mem.fWaterJump -= tmFrame;
+      if (mem.fWaterJump <= 0.0f || iWater == 0) mem.fWaterJump = 0.0f;
+      v = vUp * (v % vUp) + mem.vWaterJump;
+      CheckVelocity(s, v);
+      vMoved += v * tmFrame;
+      bGround = FALSE;
+    } else if (iWater >= 2) {
+      bGround = FALSE;
+      // PM_CheckWaterJump: waist deep, facing a wall with nothing over it, not backing away from it
+      if (iWater == 2 && in.bWallAhead && (v % vUp) >= WATERJUMP_MIN_UP) {
+        const FLOAT3D vFlatV = v - vUp * (v % vUp);
+        FLOAT3D vFlatForward = Wish(in, 1.0f, 0.0f, fAt);
+        if (vFlatV.Length() == 0.0f || (vFlatV % vFlatForward) >= 0.0f) {
+          FLOAT3D vFlatNormal = in.vWallNormal - vUp * (in.vWallNormal % vUp);
+          mem.fWaterJump = WATERJUMP_TIME;
+          mem.vWaterJump = -vFlatNormal * WATERJUMP_PUSH;
+          v = vFlatV + vUp * WATERJUMP_UP;
+          out.bWaterJump = TRUE;
+        }
+      }
+      // falling again: no more jumping out
+      if ((v % vUp) < 0.0f && mem.fWaterJump > 0.0f) mem.fWaterJump = 0.0f;
+      // PM_Jump in water: up at 100 u/s while held (a water jump under way counts down instead)
+      if (in.bJump) {
+        if (mem.fWaterJump > 0.0f) {
+          mem.fWaterJump = Max(mem.fWaterJump - tmFrame, 0.0f);
+        } else {
+          v = v - vUp * (v % vUp) + vUp * WATER_JUMP_UP;
+        }
+      }
+      // PM_WaterMove: where the view looks, its pitch too
+      const BOOL bKeys = fForward != 0.0f || fSide != 0.0f;
+      WaterMove(s, v, Wish(in, fForward, fSide, fAt, in.fPitch), bKeys, vUp, fMaxSpeed, tmFrame);
+      CheckVelocity(s, v);
+      vMoved += v * tmFrame;
+    } else if (bGround) {
       // PM_WalkMove
       v -= vUp * (v % vUp);
       Friction(s, v, fFriction, tmFrame);
@@ -171,6 +261,7 @@ void Step(const Settings &s, const Input &in, Memory &mem, Output &out) {
       v -= vUp * (fGravity * tmFrame * 0.5f);
       CheckVelocity(s, v);
     }
+    fRise += (vMoved - vBefore) % vUp;
   }
 
   FLOAT3D vMove = vMoved * (fUnit / tmTick);
@@ -187,6 +278,8 @@ void Step(const Settings &s, const Input &in, Memory &mem, Output &out) {
   out.bGround = bGround;
   out.bHoldCrouch = !bGround && bDuckKey;
   out.fSpeed = (v - vUp * (v % vUp)).Length();
+  out.iWaterLevel = WATER_NOW;
+  #undef WATER_NOW
 };
 
 }; // namespace

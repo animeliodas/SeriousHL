@@ -122,11 +122,11 @@ def start_level(game: Game, level: str, timeout: float = 150.0) -> None:
     calm = 0
     while time.time() < end:
         last = game.where()
-        if "cinematic" in last:
-            game.run("hl_iTestFire=2;")
-            calm = 0
-        elif "netricsa" in last:
+        if "netricsa" in last:  # (first: with Netricsa up, fire doesn't skip an intro)
             game.run("hl_CloseNetricsa();")
+            calm = 0
+        elif "cinematic" in last:
+            game.run("hl_iTestFire=2;")
             calm = 0
         elif last and "no player" not in last:
             calm += 1
