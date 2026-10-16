@@ -10,6 +10,9 @@ Each check starts the level afresh, holds keys and turns the view through the pl
   run      forward from standing: Half-Life's top speed, 320 u/s, and he really goes that fast;
   stop     keys let go at 320 u/s: Half-Life's friction stops him in ~0.53 s after ~2 m (Sam's own: ~0.2 s);
   jump     a jump from standing: 45 units up (1.34 m at 1 u = 2.97 cm), ~0.67 s in the air;
+  duckjump a jump, then duck in the air: the feet clear 63 units (1.87 m);
+  ducktap  duck on the ground, let go within 0.4 s: popped up 18 units without a jump;
+  duckspeed walking ducked: 133 u/s;
   bhop     hopping on (jump held), strafing right and turning right 15 degrees a tick: speed builds past 1.7x the
            top speed (air strafing + no friction on landing) - a speed Sam can't reach by running;
   bhopcap  the same with hl_bBhopCap 1 (Steam Half-Life): a landing jump over 1.7x cuts the speed;
@@ -19,6 +22,7 @@ Prints PASS/FAIL per check.
 import argparse
 import csv
 import math
+import re
 import os
 import shutil
 import subprocess
@@ -35,7 +39,7 @@ UNIT = 1.9 / 64.0
 
 class Hung(Exception):
     pass
-ALL = ("run", "stop", "jump", "bhop", "bhopcap", "sam")
+ALL = ("run", "stop", "jump", "duckjump", "ducktap", "duckspeed", "rocketjump", "bhop", "bhopcap", "sam")
 
 
 class Game:
@@ -207,6 +211,62 @@ def check_bhopcap(game, results):
     results.append(("bhopcap: hl_bBhopCap 1 cuts the speed on landing past 1.7x", ok, f"top {top:.0f} u/s, {cuts} cuts"))
 
 
+def scripted(game, ticks: int, keys: str) -> list[dict]:
+    """Trace while the plugin plays a key script (hl_TestKeys: "j2,d20" - jump 2 actions, then duck 20)."""
+    return trace(game, ticks, f'hl_TestKeys("{keys}");')
+
+
+def check_duckjump(game, results):
+    # jump, then duck in the air: the feet come up 18 units more - 63 units (1.87 m) instead of 45
+    rows = scripted(game, 30, "j2,d28")
+    rise = max(r["y"] for r in rows) - rows[0]["y"]
+    ducked = any(r["ducked"] for r in rows if r["ground"] == 0)
+    ok = 1.75 <= rise <= 1.95 and ducked
+    results.append(("duckjump: a jump with a duck in the air clears 63 units (1.87 m)", ok, f"feet {rise:.3f} m up, ducked in the air {ducked}"))
+
+
+def check_ducktap(game, results):
+    # duck on the ground and let go before the duck is done (0.4 s): the standing hull pops up 18 units (0.53 m)
+    rows = scripted(game, 20, "d3,-17")
+    rise = max(r["y"] for r in rows) - rows[0]["y"]
+    air = sum(1 for r in rows if r["ground"] == 0)
+    jumped = int(sum(r["jumped"] for r in rows))
+    ok = 0.45 <= rise <= 0.62 and air >= 2 and jumped == 0
+    results.append(("ducktap: let go of duck within 0.4 s - up 18 units without a jump", ok, f"{rise:.3f} m up, {air} ticks off the ground, {jumped} jumps"))
+
+
+def check_duckspeed(game, results):
+    # walking ducked: a third of the keys' 400 u/s - 133 u/s - once ducked (0.4 s)
+    rows = scripted(game, 40, "fd40")
+    last = rows[-10:]
+    speed = sum(r["hspeed_u"] for r in last) / len(last)
+    ducked = all(r["ducked"] for r in last)
+    ok = 125 <= speed <= 140 and ducked
+    results.append(("duckspeed: ducked, 133 u/s", ok, f"{speed:.1f} u/s, ducked {ducked}"))
+
+
+def check_rocketjump(game, results):
+    # a rocket at his own feet: Half-Life's push, damage * 5 u/s away from the blast (Sam's own push taken out)
+    game.run("cht_bGod=0;", "cht_bGiveAll=1;", "cht_SetHealth(500);", "hl_iTestSelect=5;")
+    time.sleep(2.5)
+    game.run("hl_fTestPitch=-85;")
+    time.sleep(1.0)
+    mark = len(game.text())
+    rows = trace(game, 50, "hl_iTestFire=1;")
+    game.run("hl_fTestPitch=0;")
+    m = re.findall(r"damage push: ([\d.]+) damage -> (\d+) u/s", game.text()[mark:])
+    top = max(r["vy"] for r in rows) / UNIT
+    rise = max(r["y"] for r in rows) - rows[0]["y"]
+    if not m:
+        results.append(("rocketjump: Half-Life's damage push", False, f"no push (top vertical {top:.0f} u/s, {rise:.2f} m up)"))
+        return
+    damage, push = float(m[0][0]), float(m[0][1])
+    want = min(damage * 5.0, 1000.0)
+    ok = abs(push - want) < 2 and 0.8 * want <= top <= 1.05 * want and rise > 0.2
+    results.append(("rocketjump: a rocket at the feet pushes him by Half-Life's damage x 5", ok,
+                    f"{damage:.1f} damage -> {push:.0f} u/s pushed (HL: {want:.0f}), top vertical {top:.0f} u/s, {rise:.2f} m up"))
+
+
 def check_sam(game, results):
     rows = bhop(game, "hl_bEnable=0;")
     game.run("hl_bEnable=1;")
@@ -229,7 +289,8 @@ def main() -> None:
     HANG.unlink(missing_ok=True)
     if a.launch:
         launch(game)
-    checks = {"run": check_run, "stop": check_stop, "jump": check_jump, "bhop": check_bhop, "bhopcap": check_bhopcap,
+    checks = {"run": check_run, "stop": check_stop, "jump": check_jump, "duckjump": check_duckjump, "ducktap": check_ducktap,
+              "duckspeed": check_duckspeed, "rocketjump": check_rocketjump, "bhop": check_bhop, "bhopcap": check_bhopcap,
               "sam": check_sam}
     results = []
     for name in a.only.split(","):

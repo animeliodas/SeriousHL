@@ -38,3 +38,15 @@ Route: rules rewritten in the host (pattern "guest's rules headless"), on the Se
 - 2026-10-13: 0.1.0 — run/friction/air strafe/jump/bhop/cap/edge/fall damage; oracle `tools/test_hl.py` 6/6 TFE and
   6/6 TSE (all three ports installed together); installer `install/Install.cmd` tested in a sandbox (patch from zip,
   SHA-256 mismatch refused, uninstall), game discovery finds Steam TFE/TSE.
+- 2026-10-13: 0.2.0 — HL duck (in the air at once, feet up 18 u; on the ground after 0.4 s; ducktap pops 18 u),
+  Half-Life damage pushes (`CPlayer::DamageImpact` patched: damage × 5 u/s away, ×2 ducked, ≤ 1000), keys from the
+  applied action (`CPlayer::ApplyAction`), the rules as one pure step (`Rules.cpp`), the speedrun build (`build.sh all
+  run`: ruleset fixed, no `hl_*`, no test hooks, the DLL's SHA-256 on screen). Oracles: `test_hl.py` 10/10 TFE (TSE:
+  each check passed), `test_run.py` 4/4 TFE and TSE.
+
+## Факты (0.2.0)
+
+11. `PLACT_SELECT_WEAPON_SHIFT` is 9 in TFE's Player.es, 14 in TSE's (TSE adds use-held, sniper and serious bomb bits);
+    the value is the weapon key slot (5: rocket launcher), not the WeaponType.
+12. `cht_bGod` stops all damage before `DamageImpact`: tests of damage pushes turn it off.
+13. In-game demos are broken in this setup (the user): not used for verification.

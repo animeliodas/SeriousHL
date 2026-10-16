@@ -13,6 +13,8 @@
   <ItemGroup>
     <ClInclude Include="Source\StdH.h" />
     <ClInclude Include="Source\HlMove.h" />
+    <ClInclude Include="Source\Rules.h" />
+    <ClInclude Include="Source\Run.h" />
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="Source\StdH.cpp">
@@ -20,10 +22,17 @@
     </ClCompile>
     <ClCompile Include="Source\Main.cpp" />
     <ClCompile Include="Source\HlMove.cpp" />
+    <ClCompile Include="Source\Rules.cpp" />
+    <ClCompile Include="Source\Run.cpp" />
   </ItemGroup>
   <PropertyGroup>
     <!-- the SeriousBridge core (github.com/animeliodas/SeriousBridge): build.sh passes it; by default next to this repo -->
     <SeriousBridgeDir Condition="'$(SeriousBridgeDir)' == ''">$(MSBuildThisFileDirectory)..\..\seriousbridge\</SeriousBridgeDir>
+  </PropertyGroup>
+  <PropertyGroup>
+    <!-- the speedrun build (build.sh run): the ruleset fixed, no console variables or test hooks -->
+    <SeriousHLFlavor Condition="'$(SeriousHLRun)' == 'true'">Run_</SeriousHLFlavor>
+    <SeriousHLDefines Condition="'$(SeriousHLRun)' == 'true'">SERIOUSHL_RUN;</SeriousHLDefines>
   </PropertyGroup>
   <PropertyGroup Label="Globals">
     <ProjectGuid>{3E7C2A91-5D4B-4F86-B2C1-7A9E0D6F1C24}</ProjectGuid>
@@ -57,8 +66,8 @@
     <LinkIncremental>false</LinkIncremental>
     <IncludePath>$(SamEngineIncludes);$(SdkIncl);$(SuperProjectDir)Extras\XGizmo\..;$(ProjectDir)Source;</IncludePath>
     <LibraryPath>$(SamEngineLibraries);$(SuperProjectDir)Bin\$(Configuration);$(SdkLibs)</LibraryPath>
-    <OutDir>$(ProjectDir)dist\$(Configuration)\</OutDir>
-    <IntDir>$(ProjectDir)build\$(Configuration)\</IntDir>
+    <OutDir>$(ProjectDir)dist\$(SeriousHLFlavor)$(Configuration)\</OutDir>
+    <IntDir>$(ProjectDir)build\$(SeriousHLFlavor)$(Configuration)\</IntDir>
     <TargetName>SeriousHL</TargetName>
     <ExecutablePath>$(SdkExe)</ExecutablePath>
   </PropertyGroup>
@@ -66,8 +75,8 @@
     <LinkIncremental>false</LinkIncremental>
     <IncludePath>$(SamEngineIncludes);$(SdkIncl);$(SuperProjectDir)Extras\XGizmo\..;$(ProjectDir)Source;</IncludePath>
     <LibraryPath>$(SamEngineLibraries);$(SuperProjectDir)Bin\$(Configuration);$(SdkLibs)</LibraryPath>
-    <OutDir>$(ProjectDir)dist\$(Configuration)\</OutDir>
-    <IntDir>$(ProjectDir)build\$(Configuration)\</IntDir>
+    <OutDir>$(ProjectDir)dist\$(SeriousHLFlavor)$(Configuration)\</OutDir>
+    <IntDir>$(ProjectDir)build\$(SeriousHLFlavor)$(Configuration)\</IntDir>
     <TargetName>SeriousHL</TargetName>
     <ExecutablePath>$(SdkExe)</ExecutablePath>
   </PropertyGroup>
@@ -78,7 +87,7 @@
       <WarningLevel>Level3</WarningLevel>
       <IntrinsicFunctions>true</IntrinsicFunctions>
       <StringPooling>true</StringPooling>
-      <PreprocessorDefinitions>$(SamEnginePreproc);%(PreprocessorDefinitions);NDEBUG;SERIOUSHL_GAME_TFE</PreprocessorDefinitions>
+      <PreprocessorDefinitions>$(SamEnginePreproc);%(PreprocessorDefinitions);NDEBUG;SERIOUSHL_GAME_TFE;$(SeriousHLDefines)</PreprocessorDefinitions>
       <PrecompiledHeader>Use</PrecompiledHeader>
       <PrecompiledHeaderFile>StdH.h</PrecompiledHeaderFile>
       <DisableSpecificWarnings>4996;4333;4244;4305</DisableSpecificWarnings>
@@ -99,7 +108,7 @@
       <WarningLevel>Level3</WarningLevel>
       <IntrinsicFunctions>true</IntrinsicFunctions>
       <StringPooling>true</StringPooling>
-      <PreprocessorDefinitions>$(SamEnginePreproc);%(PreprocessorDefinitions);NDEBUG;SERIOUSHL_GAME_TSE</PreprocessorDefinitions>
+      <PreprocessorDefinitions>$(SamEnginePreproc);%(PreprocessorDefinitions);NDEBUG;SERIOUSHL_GAME_TSE;$(SeriousHLDefines)</PreprocessorDefinitions>
       <PrecompiledHeader>Use</PrecompiledHeader>
       <PrecompiledHeaderFile>StdH.h</PrecompiledHeaderFile>
       <DisableSpecificWarnings>4996;4333;4244;4305</DisableSpecificWarnings>
