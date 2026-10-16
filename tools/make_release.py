@@ -30,6 +30,9 @@ Console (~):
   hl_bEnable 1     Half-Life movement (0: Sam's own)
   hl_bWeapons 1    Half-Life's weapons on Sam's guns (right mouse button: second fire; 0: Sam's weapons)
   hl_Status()      what it does now
+Speedrun tools: a timer (RTA, and IGT: the game's ticks - no loads, pauses or menus) top right, a speedometer under
+the crosshair, LiveSplit started/split/ended through its TCP server (LiveSplit: Control -> Start TCP Server; port
+16834; compare against Game Time for IGT). sr_bShowTimer, sr_bShowSpeed, sr_bLiveSplit, sr_strLiveSplit, sr_iStartOn.
 Uninstall: Uninstall.cmd (Classics Patch stays).
 
 Single player. Made with Claude Code (AI); tested by scripts in the real games (README on GitHub).
@@ -42,7 +45,8 @@ https://github.com/animeliodas/SeriousHL
 
 The same movement as SeriousHL {VERSION} (the movement only: Sam's weapons stay), with Half-Life's ruleset fixed: hold jump to hop (autojump), no bunny hop
 cap, 100 fps rules, Half-Life's speeds, friction, gravity, ducking and damage pushes. There are no hl_* console
-variables to change and no test hooks. In the bottom left corner the game shows "SeriousHL {VERSION} RUN <8 digits>":
+variables to change and no test hooks. With the speedrun tools: a timer (RTA and IGT), LiveSplit through its TCP
+server (Control -> Start TCP Server; it starts, splits, ends; its Game Time is the IGT), a speedometer. In the bottom left corner the game shows "SeriousHL {VERSION} RUN <8 digits>":
 the first digits of this DLL's SHA-256 (the full one is in SeriousSam_Custom.log) - moderators compare them with the
 release page.
 

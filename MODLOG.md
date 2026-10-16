@@ -74,3 +74,22 @@ Route: rules rewritten in the host (pattern "guest's rules headless"), on the Se
 - 2026-10-16: 0.3.0 — Half-Life's weapons on Sam's guns (crowbar, .357, Glock, shotgun, MP5 + grenade, RPG, hand
   grenades, gauss with charged shot and boost), the core's action filter. Oracles: `test_weapons.py` 5/5 TFE and TSE,
   `test_hl.py` 10/10 TFE and TSE.
+
+## Факты (0.4.0, таймер)
+
+20. Sam's controls add jump and crouch into one number (`pa_vTranslation(2)` = up - down): both held come out as 0 and
+    Sam stands up. `ctl_bMoveUp` / `ctl_bMoveDown` are shell symbols (the local controls): the core puts both into the
+    action (crouch, plus its own button bit 31), and takes the bit out before Player.es.
+21. Player.es (401): `m_bEndOfLevel` (96) is set when the level's stats are recorded (its end), `m_bEndOfGame` (97) at
+    the end of the game - the splits. The intro behind the menu is a game too, started with `gam_iStartMode` -1
+    (flyover): not a run.
+22. Single player pauses (no ticks) with a menu, the console or Netricsa up, and on the Pause key (`TogglePause`): the
+    IGT is the ticks.
+23. WorldLink (class 214, its name "World link"; m_strWorld = 2) changes the level on an ETrigger.
+24. LiveSplit's server: one command a line (`reset`, `starttimer`, `initgametime`, `pausegametime`, `setgametime
+    h:mm:ss.fff`, `split`), TCP 16834; with its game time paused LiveSplit shows exactly what is set.
+
+## Журнал (0.4.0)
+
+- 2026-10-16: 0.4.0 — the speedrun tools (core Speedrun: RTA/IGT timer, LiveSplit; the speedometer), the jump while
+  ducked. Oracle `test_speedrun.py` 7/7 TFE and TSE.
