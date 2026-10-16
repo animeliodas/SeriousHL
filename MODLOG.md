@@ -95,3 +95,23 @@ Route: rules rewritten in the host (pattern "guest's rules headless"), on the Se
   ducked. Oracle `test_speedrun.py` 7/7 TFE and TSE.
 - 2026-10-16: 0.4.1 — the timer, LiveSplit and the speedometer moved out into their own plugin, SeriousSpeedrun (for
   runs of the game as it is too); SeriousHL keeps the jump while ducked (`test_hl.py duckhold`).
+
+## Факты (0.5.0, полный перенос HL)
+
+25. The engine's WAV loader wants RIFF/WAVE, `fmt `, an optional `fact`, then `data` - Half-Life's own wavs carry
+    `LIST`/`cue ` chunks (8-bit 22050 Hz mono): the installer rewrites each into a plain RIFF (fmt 16 + data).
+26. `CEntity::PlaySound(so, fnm, flags)` plays any file by name: Half-Life's sounds go from Sounds/SeriousHL/ next to the
+    game, copied by the installer from the player's own Half-Life (valve/sound), never shipped.
+27. A PowerShell script's new optional parameter takes positional arguments before the old ones: `install.ps1 <folder>`
+    bound the folder to `-HalfLife` and the script went looking for the games on its own. `[CmdletBinding(
+    PositionalBinding = $false)]` now: no parameter binds by position.
+28. Player.es ReceiveDamage: difficulty first (`sp_fDamageStrength`, not one's own when > 1), then armour 2/3 a point
+    for a point, then `DamageImpact` with the health part, then CPlayerEntity::ReceiveDamage. Half-Life's armour sits in
+    front: Sam's code gets the health part (difficulty taken back out) with the armour set to 0 for the call.
+29. `DMT_IMPACT` is also the monsters' (EnemyBase, the Devil, rolling stones): only the movement's own one (inflictor =
+    the player) counts as a fall. The gauss overcharging goes through the armour (`hev::SelfDamage`).
+
+## Журнал (0.5.0)
+
+- 2026-10-16: Half-Life's weapon sounds from the player's Half-Life (`install.ps1` asset step, `-AssetsOnly`); the HEV
+  armour (`Hev.cpp`, `hl_bHevArmor`). Oracle `test_weapons.py sounds,hev,gauss` TFE and TSE PASS.

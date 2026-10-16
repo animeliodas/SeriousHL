@@ -9,6 +9,7 @@
  * Half-Life's ruleset fixed, no hl_* to change, no test hooks, a mark on the screen - Run.h).
  */
 #include "StdH.h"
+#include "Hev.h"
 #include "HlMove.h"
 #include "Run.h"
 #include "Weapons.h"
@@ -34,6 +35,7 @@ static void HL_Status(SHELL_FUNC_ARGS) {
 #else
   CPrintF("[SeriousHL] %s\n", hl::Status().str_String);
   CPrintF("[SeriousHL] %s\n", weapons::Status(player::Local()).str_String);
+  CPrintF("[SeriousHL] %s\n", hev::Status().str_String);
 #endif
 };
 
@@ -180,6 +182,11 @@ static void HL_DumpAnims(SHELL_FUNC_ARGS) {
   weapons::DumpAnims(player::Local());
 };
 
+static void HL_TestDamage(SHELL_FUNC_ARGS) {
+  BEGIN_SHELL_FUNC;
+  hev::TestDamage(player::Local(), NEXT_ARG(CTString *)->str_String);
+};
+
 static void HL_Trace(SHELL_FUNC_ARGS) {
   BEGIN_SHELL_FUNC;
   hl::TraceTicks(NEXT_ARG(INDEX));
@@ -234,8 +241,10 @@ static void DeclareUsual(void) {
   ClassicsPlugins()->RegisterMethod(TRUE, "void", "hl_SpawnTarget", "CTString", &HL_SpawnTarget);
   ClassicsPlugins()->RegisterMethod(TRUE, "void", "hl_Probe", "void", &HL_Probe);
   ClassicsPlugins()->RegisterMethod(TRUE, "void", "hl_Aim", "CTString", &HL_Aim);
+  ClassicsPlugins()->RegisterMethod(TRUE, "void", "hl_TestDamage", "CTString", &HL_TestDamage);
   _pShell->DeclareSymbol("persistent user INDEX hl_bWeapons;", &weapons::hl_bWeapons);
   _pShell->DeclareSymbol("persistent user INDEX hl_iAltFireKey;", &weapons::hl_iAltFireKey);
+  _pShell->DeclareSymbol("persistent user INDEX hl_bHevArmor;", &hev::hl_bHevArmor);
   _pShell->DeclareSymbol("user INDEX hl_iTestAlt;", &weapons::hl_iTestAlt);
 
   rules::Settings &s = hl::_settings;
@@ -344,7 +353,10 @@ CLASSICSPATCH_PLUGIN_STARTUP(HIniConfig props, PluginEvents_t &events) {
   const BOOL bHooked = hl::Init();
 #ifndef SERIOUSHL_RUN
   // (the speedrun build is the movement only, as its category is)
-  if (bHooked) weapons::Init();
+  if (bHooked) {
+    weapons::Init();
+    hev::Init();
+  }
 #endif
   CPrintF("^cff8800[SeriousHL]^r %s loaded: Half-Life movement %s (autojump %d, bhop cap %d)\n", SERIOUSHL_VERSION,
     !bHooked ? "unavailable" : hl::hl_bEnable ? "on" : "off", hl::_settings.bAutoJump, hl::_settings.bBhopCap);

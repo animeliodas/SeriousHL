@@ -5,14 +5,23 @@
   sure Serious Sam Classics Patch 1.9.4 is there (offers to download it from its GitHub release, checked by SHA-256),
   copies SeriousHL.dll into Bin\Plugins and puts a shortcut on the desktop.
 
-    install.ps1 [-Uninstall] [-Yes] [-NoShortcut] ["<game folder>" ...]
+    install.ps1 [-Uninstall] [-Yes] [-NoShortcut] [-NoAssets | -AssetsOnly] [-HalfLife "<Half-Life folder>"] ["<game folder>" ...]
 
   Offline: put Classics Patch's zip (TFE1.05_2025_10_15.zip / TSE1.07_2025_10_15.zip) next to this file.
+
+  Half-Life's own sounds (and later its weapon models): taken from the player's Half-Life (found in Steam's libraries,
+  or -HalfLife) into the game's Sounds\SeriousHL (and Models\SeriousHL). They're Valve's: they stay on this machine.
+  Without Half-Life SeriousHL uses Sam's.
 #>
+# (no positional binding: a game's folder must never land in -HalfLife)
+[CmdletBinding(PositionalBinding = $false)]
 param(
   [switch]$Uninstall,
   [switch]$Yes,
   [switch]$NoShortcut,
+  [switch]$NoAssets,
+  [switch]$AssetsOnly,
+  [string]$HalfLife = '',
   [Parameter(ValueFromRemainingArguments = $true)][string[]]$Folders
 )
 $ErrorActionPreference = 'Stop'
@@ -93,6 +102,66 @@ function Install-ClassicsPatch([string]$Dir, [string]$Kind) {
   Write-Host "  Classics Patch 1.9.4 installed"
 }
 
+# Half-Life's "valve" folder: -HalfLife (the game's folder or valve itself), else Steam's libraries
+function Find-HalfLife {
+  $candidates = @()
+  if ($HalfLife) { $candidates += $HalfLife; $candidates += (Join-Path $HalfLife 'valve') }
+  $steam = (Get-ItemProperty 'HKCU:\Software\Valve\Steam' -ErrorAction SilentlyContinue).SteamPath
+  if ($steam) {
+    $steam = $steam -replace '/', '\'
+    $libraries = @($steam)
+    $vdf = Join-Path $steam 'steamapps\libraryfolders.vdf'
+    if (Test-Path $vdf) {
+      foreach ($m in [regex]::Matches((Get-Content $vdf -Raw), '"path"\s+"([^"]+)"')) { $libraries += ($m.Groups[1].Value -replace '\\\\', '\') }
+    }
+    foreach ($lib in ($libraries | Sort-Object -Unique)) { $candidates += (Join-Path $lib 'steamapps\common\Half-Life\valve') }
+  }
+  foreach ($c in $candidates) {
+    if ($c -and (Test-Path (Join-Path $c 'sound\weapons'))) { return (Resolve-Path $c).Path }
+  }
+  return $null
+}
+
+# A wave as Serious Engine reads it: RIFF, WAVE, a 16-byte "fmt ", "data" - nothing else (Half-Life's have LIST and cue)
+function Write-CleanWave([string]$Source, [string]$Target) {
+  $b = [IO.File]::ReadAllBytes($Source)
+  if ($b.Length -lt 12 -or [Text.Encoding]::ASCII.GetString($b, 0, 4) -ne 'RIFF') { return $false }
+  $fmt = $null; $data = $null
+  $i = 12
+  while ($i + 8 -le $b.Length) {
+    $id = [Text.Encoding]::ASCII.GetString($b, $i, 4)
+    $len = [BitConverter]::ToInt32($b, $i + 4)
+    if ($len -lt 0 -or $i + 8 + $len -gt $b.Length) { $len = $b.Length - $i - 8 }
+    if ($id -eq 'fmt ' -and $len -ge 16) { $fmt = New-Object byte[] 16; [Array]::Copy($b, $i + 8, $fmt, 0, 16) }
+    if ($id -eq 'data') { $data = New-Object byte[] $len; [Array]::Copy($b, $i + 8, $data, 0, $len) }
+    $i += 8 + $len + ($len -band 1)
+  }
+  if ($fmt -eq $null -or $data -eq $null -or [BitConverter]::ToInt16($fmt, 0) -ne 1) { return $false }
+  $ms = New-Object IO.MemoryStream
+  $w = New-Object IO.BinaryWriter $ms
+  $w.Write([Text.Encoding]::ASCII.GetBytes('RIFF')); $w.Write([int](4 + 8 + 16 + 8 + $data.Length + ($data.Length -band 1)))
+  $w.Write([Text.Encoding]::ASCII.GetBytes('WAVE'))
+  $w.Write([Text.Encoding]::ASCII.GetBytes('fmt ')); $w.Write([int]16); $w.Write($fmt)
+  $w.Write([Text.Encoding]::ASCII.GetBytes('data')); $w.Write([int]$data.Length); $w.Write($data)
+  if ($data.Length -band 1) { $w.Write([byte]0) }
+  $w.Flush()
+  [IO.File]::WriteAllBytes($Target, $ms.ToArray())
+  return $true
+}
+
+function Install-HalfLifeAssets([string]$Dir, [string]$Valve) {
+  $root = Join-Path $Dir 'Sounds\SeriousHL'
+  $n = 0
+  foreach ($sub in 'weapons', 'items') {
+    $out = Join-Path $root $sub
+    New-Item -ItemType Directory -Force -Path $out | Out-Null
+    foreach ($f in Get-ChildItem (Join-Path $Valve "sound\$sub") -Filter *.wav -ErrorAction SilentlyContinue) {
+      if (Write-CleanWave $f.FullName (Join-Path $out $f.Name)) { $n++ }
+    }
+  }
+  Write-Host "  $n sounds from Half-Life ($Valve) -> $root"
+}
+
 function New-Shortcut([string]$Dir, [string]$Kind) {
   $desktop = [Environment]::GetFolderPath('Desktop')
   $link = Join-Path $desktop "$($Titles[$Kind]) (Half-Life movement).lnk"
@@ -125,13 +194,27 @@ function Install-Into([string]$Dir) {
   New-Item -ItemType Directory -Force -Path $plugins | Out-Null
   Copy-Item (Join-Path $Here "$kind\SeriousHL.dll") (Join-Path $plugins 'SeriousHL.dll') -Force
   Write-Host "  SeriousHL installed: $plugins\SeriousHL.dll"
+  if (-not $NoAssets) { Install-AssetsInto $Dir }
   if (-not $NoShortcut -and (Ask "  Put a shortcut on the desktop (it starts the game with Classics Patch)?" $true)) { New-Shortcut $Dir $kind }
+}
+
+function Install-AssetsInto([string]$Dir) {
+  $valve = Find-HalfLife
+  if (-not $valve) {
+    Write-Host "  Half-Life not found (or give -HalfLife): Sam's sounds stay"
+    return
+  }
+  if (Ask "  Take Half-Life's weapon sounds from your Half-Life ($valve)? They stay on this PC" $true) { Install-HalfLifeAssets $Dir $valve }
 }
 
 function Uninstall-From([string]$Dir) {
   $kind = Get-Kind $Dir
   $dll = Join-Path $Dir 'Bin\Plugins\SeriousHL.dll'
   if (Test-Path $dll) { Remove-Item $dll -Force; Write-Host "removed $dll" }
+  foreach ($sub in 'Sounds\SeriousHL', 'Models\SeriousHL') {
+    $p = Join-Path $Dir $sub
+    if (Test-Path $p) { Remove-Item $p -Recurse -Force; Write-Host "removed $p (Half-Life's files)" }
+  }
   $link = Join-Path ([Environment]::GetFolderPath('Desktop')) "$($Titles[$kind]) (Half-Life movement).lnk"
   if (Test-Path $link) { Remove-Item $link -Force; Write-Host "removed $link" }
 }
@@ -153,7 +236,7 @@ if ($games.Count -eq 0) {
 $failed = $false
 foreach ($g in $games) {
   try {
-    if ($Uninstall) { Uninstall-From $g } else { Install-Into $g }
+    if ($Uninstall) { Uninstall-From $g } elseif ($AssetsOnly) { Install-AssetsInto $g } else { Install-Into $g }
   } catch {
     Write-Host "  failed: $($_.Exception.Message)" -ForegroundColor Red
     $failed = $true

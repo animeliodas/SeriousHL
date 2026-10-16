@@ -1,6 +1,7 @@
 /* SeriousHL - Half-Life's weapons on Sam's guns. See Weapons.h. */
 #include "StdH.h"
 #include "Weapons.h"
+#include "Hev.h"
 #include "HlMove.h"
 #include "Movement.h"
 #include "Player.h"
@@ -8,6 +9,8 @@
 
 #include <Extras/XGizmo/Objects/StructPtr.h>
 #include <stdio.h>
+#include <map>
+#include <string>
 
 namespace weapons {
 
@@ -124,10 +127,48 @@ static INDEX *Reserve(CEntity *pw, Gun g) {
 static FLOAT FireX(INDEX iSam) { return _symFX.Exists() ? ((FLOAT *)_symFX.GetValue())[iSam] : 0.0f; };
 static FLOAT FireY(INDEX iSam) { return _symFY.Exists() ? ((FLOAT *)_symFY.GetValue())[iSam] : 0.0f; };
 
-static void Sound(CEntity *pen, CEntity *pw, INDEX iSound, BOOL bSecond) {
+// Half-Life's own sound when the installer took it from the player's Half-Life (Sounds\SeriousHL\<"weapons\x.wav">;
+// a list "a.wav|b.wav" picks one at random, as Half-Life does), else Sam's component.
+static std::map<std::string, BOOL> _mapHave;
+static ULONG _ctHLSounds = 0, _ctSamSounds = 0;
+
+static BOOL HaveSound(const CTFileName &fnm) {
+  std::map<std::string, BOOL>::iterator it = _mapHave.find(fnm.str_String);
+  if (it != _mapHave.end()) return it->second;
+  const BOOL bHave = FileExists(fnm);
+  _mapHave[fnm.str_String] = bHave;
+  return bHave;
+};
+
+static void Sound(CEntity *pen, CEntity *pw, const char *strHL, INDEX iSound, BOOL bSecond) {
   CSoundObject *pso = (CSoundObject *)player::Prop(pen, bSecond ? PROP_SOUND1 : PROP_SOUND0);
+  if (pso == NULL) return;
+  if (strHL != NULL) {
+    // one of the list
+    char strList[160];
+    strncpy(strList, strHL, sizeof(strList) - 1);
+    strList[sizeof(strList) - 1] = 0;
+    const char *astr[8];
+    INDEX ct = 0;
+    for (char *str = strtok(strList, "|"); str != NULL && ct < 8; str = strtok(NULL, "|")) astr[ct++] = str;
+    if (ct > 0) {
+      const CTFileName fnm = CTString("Sounds\\SeriousHL\\") + astr[pw->IRnd() % ct];
+      if (HaveSound(fnm)) {
+        try {
+          pw->PlaySound(*pso, fnm, SOF_3D | SOF_VOLUMETRIC);
+          _ctHLSounds++;
+          return;
+        } catch (char *) {
+          _mapHave[fnm.str_String] = FALSE;
+        }
+      }
+    }
+  }
   // (a component's id is its class's with its number: (402 << 8) | n)
-  if (pso != NULL) pw->PlaySound(*pso, (402L << 8) | iSound, SOF_3D | SOF_VOLUMETRIC);
+  if (iSound >= 0) {
+    pw->PlaySound(*pso, (402L << 8) | iSound, SOF_3D | SOF_VOLUMETRIC);
+    _ctSamSounds++;
+  }
 };
 
 // Sam's fire animation of the gun in hand, by name (the first of the names the model has)
@@ -211,8 +252,10 @@ static void StartReload(CEntity *pen, CEntity *pw, Gun g, GunState &gs, TIME tmN
   if (gs.tmReloaded > 0 || gs.iClip >= _aiClip[g]) return;
   if (piReserve != NULL && *piReserve <= 0) return;
   gs.tmReloaded = tmNow + _afReload[g];
-  if (g == G_SHOTGUN) Sound(pen, pw, SND_DOUBLESHOTGUN_RELOAD, TRUE);
-  else if (g == G_PYTHON || g == G_GLOCK) Sound(pen, pw, SND_COLT_RELOAD, TRUE);
+  if (g == G_SHOTGUN) Sound(pen, pw, "weapons\\reload1.wav|weapons\\reload3.wav", SND_DOUBLESHOTGUN_RELOAD, TRUE);
+  else if (g == G_PYTHON) Sound(pen, pw, "weapons\\357_reload1.wav", SND_COLT_RELOAD, TRUE);
+  else if (g == G_GLOCK) Sound(pen, pw, "items\\9mmclip1.wav", SND_COLT_RELOAD, TRUE);
+  else if (g == G_MP5) Sound(pen, pw, "items\\clipinsert1.wav", -1, TRUE);
   Log("reload", g, gs.iClip, piReserve != NULL ? *piReserve : -1);
 };
 
@@ -282,7 +325,8 @@ static void Filter(CEntity *pen, CPlayerAction &pa) {
       // 32 units from the eyes
       const BOOL bHit = (pw->*_pCutWithKnife)(0.0f, 0.0f, 32.0f * Unit() + 0.5f, 0.3f, 0.3f, DMG_CROWBAR);
       gs.tmNext = tmNow + (bHit ? 0.25f : 0.5f);
-      Sound(pen, pw, bHit ? SND_KNIFE_HIGH : SND_KNIFE_LONG, FALSE);
+      Sound(pen, pw, bHit ? "weapons\\cbar_hitbod1.wav|weapons\\cbar_hitbod2.wav|weapons\\cbar_hitbod3.wav" : "weapons\\cbar_miss1.wav",
+        bHit ? SND_KNIFE_HIGH : SND_KNIFE_LONG, FALSE);
       Anim(pw, "Attack1,Attack01,Attack");
       _ctShots++;
       _fLastDamage = bHit ? DMG_CROWBAR : 0.0f;
@@ -294,7 +338,7 @@ static void Filter(CEntity *pen, CPlayerAction &pa) {
       Bullet(pw, iSam, 8192.0f, DMG_357, CONE_1);
       gs.iClip--;
       gs.tmNext = tmNow + 0.75f;
-      Sound(pen, pw, SND_COLT_FIRE, FALSE);
+      Sound(pen, pw, "weapons\\357_shot1.wav|weapons\\357_shot2.wav", SND_COLT_FIRE, FALSE);
       Anim(pw, "Fire1,Fire");
       Flash(pw);
       Noise(pw, 50.0f);
@@ -308,7 +352,7 @@ static void Filter(CEntity *pen, CPlayerAction &pa) {
       Bullet(pw, iSam, 8192.0f, DMG_9MM, bFire ? 0.01f : 0.1f);
       gs.iClip--;
       gs.tmNext = tmNow + (bFire ? 0.3f : 0.2f);
-      Sound(pen, pw, SND_COLT_FIRE, FALSE);
+      Sound(pen, pw, "weapons\\pl_gun3.wav", SND_COLT_FIRE, FALSE);
       Anim(pw, "FireRight,Fire1,Fire");
       Flash(pw);
       Noise(pw, 40.0f);
@@ -320,7 +364,7 @@ static void Filter(CEntity *pen, CPlayerAction &pa) {
       Pellets(pw, iSam, 12, DMG_BUCKSHOT, CONE_10);
       gs.iClip -= 2;
       gs.tmNext = tmNow + 1.5f;
-      Sound(pen, pw, SND_DOUBLESHOTGUN_FIRE, FALSE);
+      Sound(pen, pw, "weapons\\dbarrel1.wav", SND_DOUBLESHOTGUN_FIRE, FALSE);
       Anim(pw, "Fire1,Fire,Fire1Fast");
       Flash(pw);
       Noise(pw, 60.0f);
@@ -329,7 +373,7 @@ static void Filter(CEntity *pen, CPlayerAction &pa) {
       Pellets(pw, iSam, 6, DMG_BUCKSHOT, CONE_10);
       gs.iClip -= 1;
       gs.tmNext = tmNow + 0.75f;
-      Sound(pen, pw, SND_SHOTGUN_FIRE, FALSE);
+      Sound(pen, pw, "weapons\\sbarrel1.wav", SND_SHOTGUN_FIRE, FALSE);
       Anim(pw, "Fire1,Fire,Fire1Fast");
       Flash(pw);
       Noise(pw, 60.0f);
@@ -344,7 +388,7 @@ static void Filter(CEntity *pen, CPlayerAction &pa) {
         (pw->*_pFireGrenade)(1);
         (*piGrenades)--;
         gs.tmNext = tmNow + 1.0f;
-        Sound(pen, pw, SND_GRENADE_FIRE, FALSE);
+        Sound(pen, pw, "weapons\\glauncher.wav|weapons\\glauncher2.wav", SND_GRENADE_FIRE, FALSE);
         _ctShots++;
         Log("grenade", g, gs.iClip, *piGrenades);
       }
@@ -352,7 +396,7 @@ static void Filter(CEntity *pen, CPlayerAction &pa) {
       Bullet(pw, iSam, 8192.0f, DMG_MP5, CONE_3);
       gs.iClip--;
       gs.tmNext = tmNow + 0.1f;
-      Sound(pen, pw, SND_TOMMYGUN_FIRE, FALSE);
+      Sound(pen, pw, "weapons\\hks1.wav|weapons\\hks2.wav|weapons\\hks3.wav", SND_TOMMYGUN_FIRE, FALSE);
       Anim(pw, "Fire");
       Flash(pw);
       Noise(pw, 50.0f);
@@ -364,7 +408,7 @@ static void Filter(CEntity *pen, CPlayerAction &pa) {
       (pw->*_pFireRocket)();
       gs.iClip--;
       gs.tmNext = tmNow + 1.5f;
-      Sound(pen, pw, SND_ROCKET_FIRE, FALSE);
+      Sound(pen, pw, "weapons\\rocketfire1.wav", SND_ROCKET_FIRE, FALSE);
       Anim(pw, "Fire");
       Noise(pw, 60.0f);
       _ctShots++;
@@ -380,7 +424,7 @@ static void Filter(CEntity *pen, CPlayerAction &pa) {
       (pw->*_pFireGrenade)(0);
       if (piReserve != NULL) (*piReserve)--;
       gs.tmNext = tmNow + 0.5f;
-      Sound(pen, pw, SND_GRENADE_FIRE, FALSE);
+      Sound(pen, pw, NULL, SND_GRENADE_FIRE, FALSE);
       Anim(pw, "Fire");
       _ctShots++;
       Log("throw", g, 0, piReserve != NULL ? *piReserve : -1);
@@ -396,7 +440,7 @@ static void Filter(CEntity *pen, CPlayerAction &pa) {
       }
       if (tmCharged >= 10.0f) {
         _bCharging = FALSE;
-        pen->InflictDirectDamage(pen, pen, DMT_IMPACT, 50.0f, pen->GetPlacement().pl_PositionVector, FLOAT3D(0, -1, 0));
+        hev::SelfDamage(pen, 50.0f);
         gs.tmNext = tmNow + 1.0f;
         Log("overcharge", g, 0, iReserve);
       } else if (!bAlt) {
@@ -410,7 +454,7 @@ static void Filter(CEntity *pen, CPlayerAction &pa) {
         vPush -= vUp * (vPush % vUp);
         pmen->en_vCurrentTranslationAbsolute -= vPush;
         gs.tmNext = tmNow + 1.0f;
-        Sound(pen, pw, SND_LASER_FIRE, FALSE);
+        Sound(pen, pw, "weapons\\gauss2.wav", SND_LASER_FIRE, FALSE);
         Anim(pw, "Fire");
         Flash(pw);
         Noise(pw, 60.0f);
@@ -425,7 +469,7 @@ static void Filter(CEntity *pen, CPlayerAction &pa) {
       Bullet(pw, iSam, 8192.0f, DMG_GAUSS, 0.0f);
       if (piReserve != NULL) *piReserve -= 2;
       gs.tmNext = tmNow + 0.2f;
-      Sound(pen, pw, SND_LASER_FIRE, FALSE);
+      Sound(pen, pw, "weapons\\gauss2.wav", SND_LASER_FIRE, FALSE);
       Anim(pw, "Fire");
       Flash(pw);
       Noise(pw, 50.0f);
@@ -504,8 +548,9 @@ CTString Status(CEntity *pen) {
   CEntity *pw = pen != NULL ? player::PropEntity(pen, PROP_WEAPONS) : NULL;
   const INDEX iSam = pw != NULL ? player::PropIndex(pw, PW_CURRENT, 0) : -1;
   const Gun g = GunFor(iSam);
-  str.PrintF("weapons %s; in hand Sam's %d = %s, clip %d%s; %u shots (last %.0f damage, %s)", !_bReady ? "unavailable" : hl_bWeapons ? "Half-Life's" : "Sam's",
-    iSam, _astrGun[g], _aGuns[g].iClip, _bCharging ? ", charging" : "", _ctShots, _fLastDamage, _strLast);
+  str.PrintF("weapons %s; in hand Sam's %d = %s, clip %d%s; %u shots (last %.0f damage, %s); sounds: %u Half-Life's, %u Sam's",
+    !_bReady ? "unavailable" : hl_bWeapons ? "Half-Life's" : "Sam's",
+    iSam, _astrGun[g], _aGuns[g].iClip, _bCharging ? ", charging" : "", _ctShots, _fLastDamage, _strLast, _ctHLSounds, _ctSamSounds);
   return str;
 };
 

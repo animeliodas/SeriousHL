@@ -9,7 +9,9 @@ at a target, its health):
   crowbar  a crowbar blow at 1.2 m: 10;
   rate     the MP5 held 2 s fires every 0.1 s (~20 shots); the Glock every 0.3 s;
   clip     the .357 held: 6 shots, then a 2 s reload, then fires again;
-  gauss    the gauss charged 2 s and let go: 100 damage and a push back of 500 u/s along the ground.
+  gauss    the gauss charged 2 s and let go: 100 damage and a push back of 500 u/s along the ground;
+  sounds   every gun plays Half-Life's own sounds (needs them taken from the player's Half-Life: install.ps1 -AssetsOnly);
+  hev      Half-Life's armour: 80% of a hit on it, a point of it stops two, none for falls; Sam's back with hl_bHevArmor 0.
 Prints PASS/FAIL per check.
 """
 import argparse
@@ -19,7 +21,7 @@ import time
 
 import test_hl
 
-ALL = ("damage", "crowbar", "rate", "clip", "gauss")
+ALL = ("damage", "crowbar", "rate", "clip", "gauss", "sounds", "hev")
 UNIT = test_hl.UNIT
 # Sam's WeaponType and the key slots: TFE / TSE
 SAM = {"tfe": {"knife": (1, 1), "colt": (2, 2), "doublecolt": (3, 2), "shotgun": (4, 3), "tommygun": (6, 4), "laser": (14, 8)},
@@ -141,6 +143,53 @@ def check_gauss(game, guns, results):
                     f"charged {t:.2f} s, {damage} damage, push {push} u/s, top speed {top:.0f} u/s"))
 
 
+def check_sounds(game, guns, results):
+    # with Half-Life's sounds taken from the player's Half-Life (install.ps1 -AssetsOnly): every gun sounds like Half-Life
+    for gun in ("knife", "colt", "doublecolt", "shotgun", "tommygun", "laser"):
+        if guns.take(gun):
+            game.run("hl_iTestFire=2;")
+            time.sleep(1.2)
+    out = game.run("hl_Status();", want="sounds:")
+    m = re.findall(r"sounds: (\d+) Half-Life's, (\d+) Sam's", out)
+    hl, sam = (int(m[-1][0]), int(m[-1][1])) if m else (0, -1)
+    results.append(("sounds: Half-Life's own (from the player's Half-Life) for every gun", hl >= 6 and sam == 0, f"{hl} Half-Life's, {sam} Sam's"))
+
+
+def hit(game, args: str):
+    """health before, after, armour before, after, the difficulty's damage strength"""
+    out = game.run(f'hl_TestDamage("{args}");', want="test damage")
+    m = re.findall(r"test damage [\d.]+ \w+: health ([\d.-]+) -> ([\d.-]+), armour ([\d.-]+) -> ([\d.-]+), difficulty ([\d.]+)", out)
+    return tuple(float(x) for x in m[-1]) if m else None
+
+
+def check_hev(game, guns, results):
+    game.run("cht_bGod=0;")
+    time.sleep(0.5)
+    rows = {}
+    for name, args in (("bullet", "50 bullet 100 100"), ("runs out", "50 bullet 100 10"), ("fall", "30 fall 100 100"),
+                       ("overcharge", "50 shock 100 100")):
+        rows[name] = hit(game, args)
+        time.sleep(0.3)
+    game.run("hl_bHevArmor=0;")
+    rows["Sam's"] = hit(game, "30 bullet 100 100")
+    game.run("hl_bHevArmor=1;", "cht_bGod=1;")
+    if any(r is None for r in rows.values()):
+        results.append(("hev: Half-Life's armour", False, f"no answer: {rows}"))
+        return
+    st = rows["bullet"][4]
+    own = min(st, 1.0)  # (one's own damage isn't made bigger by the difficulty)
+
+    def lost(r):
+        return r[0] - r[1], r[2] - r[3]
+
+    want = {"bullet": (0.2 * 50 * st, 0.4 * 50 * st), "runs out": (50 * st - 20, 10), "fall": (30, 0),
+            "overcharge": (0.2 * 50 * own, 0.4 * 50 * own), "Sam's": (30 * st / 3, 30 * st * 2 / 3)}
+    ok = all(abs(lost(rows[k])[0] - w[0]) < 0.05 and abs(lost(rows[k])[1] - w[1]) < 0.05 for k, w in want.items())
+    results.append(("hev: 80% on armour, a point stops two, none for falls; Sam's 2/3 with hl_bHevArmor 0", ok,
+                    f"difficulty x{st:.2f}; " + ", ".join(f"{k} health -{lost(r)[0]:.1f} armour -{lost(r)[1]:.1f} (want -{want[k][0]:.1f}/-{want[k][1]:.1f})"
+                                                       for k, r in rows.items())))
+
+
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--game", required=True)
@@ -153,7 +202,8 @@ def main() -> None:
     test_hl.HANG.unlink(missing_ok=True)
     if a.launch:
         test_hl.launch(game)
-    checks = {"damage": check_damage, "crowbar": check_crowbar, "rate": check_rate, "clip": check_clip, "gauss": check_gauss}
+    checks = {"damage": check_damage, "crowbar": check_crowbar, "rate": check_rate, "clip": check_clip, "gauss": check_gauss,
+              "sounds": check_sounds, "hev": check_hev}
     results = []
     for name in a.only.split(","):
         try:
