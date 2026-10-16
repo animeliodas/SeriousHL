@@ -16,12 +16,15 @@ ROOT = Path(__file__).resolve().parents[1]
 MAIN = (ROOT / "plugin" / "Source" / "Main.cpp").read_text(encoding="utf-8")
 VERSION = ".".join(re.search(r"MakeVersion\((\d+), (\d+), (\d+)\)", MAIN).groups())
 
-README = f"""SeriousHL {VERSION} - Half-Life movement and weapons for Serious Sam Classic (The First Encounter, The Second Encounter)
+README = f"""SeriousHL {VERSION} - Half-Life movement, swimming, weapons and HEV armour for Serious Sam Classic (The First
+Encounter, The Second Encounter)
 https://github.com/animeliodas/SeriousHL
 
 Install: double-click Install.cmd. It finds the games in Steam (or GOG; or drop the game's folder on Install.cmd),
 adds Serious Sam Classics Patch 1.9.4 if it isn't there (downloaded from its GitHub release, checked by SHA-256),
-puts SeriousHL.dll into Bin\\Plugins and a shortcut on the desktop. Play from that shortcut
+puts SeriousHL.dll into Bin\\Plugins and a shortcut on the desktop. If Half-Life is installed (Steam; or give
+-HalfLife "<Half-Life folder>"), it offers to copy Half-Life's weapon sounds from it into the game's Sounds\\SeriousHL
+(they stay on your PC; without them Sam's sounds play). Play from that shortcut
 (or Bin\\SeriousSam_Custom.exe; in Steam: launch option +game ClassicsPatchMod).
 
 Console (~):
@@ -29,6 +32,7 @@ Console (~):
   hl_bBhopCap 0    no speed cap (1: Steam Half-Life's - over 1.7x 320 u/s a landing jump cuts the speed)
   hl_bEnable 1     Half-Life movement (0: Sam's own)
   hl_bWeapons 1    Half-Life's weapons on Sam's guns (right mouse button: second fire; 0: Sam's weapons)
+  hl_bHevArmor 1   Half-Life's armour (80% of a hit on it, a point of it stops two; 0: Sam's)
   hl_Status()      what it does now
 Timer, LiveSplit, speedometer: SeriousSpeedrun (github.com/animeliodas/SeriousSpeedrun), sr_iSpeedUnits 1.
 Uninstall: Uninstall.cmd (Classics Patch stays).
@@ -42,7 +46,8 @@ RUN_README = f"""SeriousHL {VERSION} RUN - the speedrun build of Half-Life movem
 https://github.com/animeliodas/SeriousHL
 
 The same movement as SeriousHL {VERSION} (the movement only: Sam's weapons stay), with Half-Life's ruleset fixed: hold jump to hop (autojump), no bunny hop
-cap, 100 fps rules, Half-Life's speeds, friction, gravity, ducking and damage pushes. There are no hl_* console
+cap, 100 fps rules, Half-Life's speeds, friction, gravity, ducking, damage pushes and swimming (water levels, swimming
+along the view, the jump up in water, the water jump at a ledge, no fall damage into water). There are no hl_* console
 variables to change and no test hooks. The timer (RTA, IGT), LiveSplit and a speedometer: SeriousSpeedrun
 (github.com/animeliodas/SeriousSpeedrun; sr_iSpeedUnits 1 for Half-Life units). In the bottom left corner the game shows "SeriousHL {VERSION} RUN <8 digits>":
 the first digits of this DLL's SHA-256 (the full one is in SeriousSam_Custom.log) - moderators compare them with the

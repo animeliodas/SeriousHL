@@ -21,9 +21,9 @@
 
 #include <stdio.h>
 
-#define SERIOUSHL_VERSION "0.4.1"
+#define SERIOUSHL_VERSION "0.5.0"
 
-CLASSICSPATCH_DEFINE_PLUGIN(k_EPluginFlagGame, MakeVersion(0, 4, 1),
+CLASSICSPATCH_DEFINE_PLUGIN(k_EPluginFlagGame, MakeVersion(0, 5, 0),
   "SeriousBridge", "SeriousHL", "Half-Life's movement and weapons for Serious Sam's player.");
 
 // ------------------------------------------------------------------
