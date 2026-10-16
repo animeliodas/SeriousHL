@@ -16,13 +16,12 @@
 #include "Player.h"
 #include "Physics.h"
 #include "DevHook.h"
-#include "Speedrun.h"
 
 #include <stdio.h>
 
-#define SERIOUSHL_VERSION "0.4.0"
+#define SERIOUSHL_VERSION "0.4.1"
 
-CLASSICSPATCH_DEFINE_PLUGIN(k_EPluginFlagGame, MakeVersion(0, 4, 0),
+CLASSICSPATCH_DEFINE_PLUGIN(k_EPluginFlagGame, MakeVersion(0, 4, 1),
   "SeriousBridge", "SeriousHL", "Half-Life's movement and weapons for Serious Sam's player.");
 
 // ------------------------------------------------------------------
@@ -30,7 +29,6 @@ CLASSICSPATCH_DEFINE_PLUGIN(k_EPluginFlagGame, MakeVersion(0, 4, 0),
 // ------------------------------------------------------------------
 static void HL_Status(SHELL_FUNC_ARGS) {
   BEGIN_SHELL_FUNC;
-  CPrintF("[SeriousHL] %s\n", speedrun::Status().str_String);
 #ifdef SERIOUSHL_RUN
   CPrintF("[SeriousHL] %s; %s\n", run::Mark(), hl::Status().str_String);
 #else
@@ -51,14 +49,6 @@ static void HL_CloseNetricsa(SHELL_FUNC_ARGS) {
 };
 
 #ifndef SERIOUSHL_RUN
-// ETrigger (Engine's base events: code 7), to trigger a level's exit in tests
-class CTriggerEventLocal : public CEntityEvent {
-public:
-  CEntityPointer penCaused;
-  CTriggerEventLocal(void) : CEntityEvent(0x00000007) {};
-  CEntityEvent *MakeCopy(void) { return new CTriggerEventLocal(*this); };
-};
-
 // --- test hooks (tools/test_hl.py): keys held for the next ticks, the view turned every tick, fire pressed (intros),
 // keys by the tick, the player moved, ticks traced to a file. Not in the speedrun build.
 static INDEX hl_iTestTicks = 0;
@@ -236,45 +226,7 @@ static void TestAction(CPlayerAction &pa, BOOL bFresh) {
   }
 };
 
-// the level's way out (its first WorldLink) triggered, as if the player reached it
-static void HL_TestLevelExit(SHELL_FUNC_ARGS) {
-  BEGIN_SHELL_FUNC;
-  CWorld *pwo = IWorld::GetWorld();
-  CEntity *penPlayer = player::Local();
-  if (pwo == NULL || penPlayer == NULL) return;
-  FOREACHINDYNAMICCONTAINER(pwo->wo_cenEntities, CEntity, iten) {
-    CEntity *pen = &*iten;
-    const char *strClass = pen->GetClass()->ec_pdecDLLClass->dec_strName;
-    if ((pen->GetFlags() & ENF_DELETED) || (stricmp(strClass, "WorldLink") != 0 && stricmp(strClass, "World link") != 0)) continue;
-    // (the level's own way out: a link to another world)
-    CTString *pstrWorld = (CTString *)player::Prop(pen, (214UL << 8) | 2); // WorldLink.es m_strWorld
-    if (pstrWorld != NULL && pstrWorld->Length() == 0) continue;
-    CTriggerEventLocal ee;
-    ee.penCaused = penPlayer;
-    pen->SendEvent(ee);
-    CPrintF("[SeriousHL] level exit %u triggered\n", pen->en_ulID);
-    return;
-  }
-  CPrintF("[SeriousHL] level exit: none\n");
-};
-
-// the game's end, as Player.es marks it (m_bEndOfGame)
-static void HL_TestGameEnd(SHELL_FUNC_ARGS) {
-  BEGIN_SHELL_FUNC;
-  INDEX *pb = (INDEX *)player::Prop(player::Local(), (401UL << 8) | 97);
-  if (pb != NULL) *pb = TRUE;
-};
-
-// the game paused / going on, as the Pause key does
-static void HL_TestPause(SHELL_FUNC_ARGS) {
-  BEGIN_SHELL_FUNC;
-  _pNetwork->TogglePause();
-};
-
 static void DeclareUsual(void) {
-  ClassicsPlugins()->RegisterMethod(TRUE, "void", "hl_TestPause", "void", &HL_TestPause);
-  ClassicsPlugins()->RegisterMethod(TRUE, "void", "hl_TestLevelExit", "void", &HL_TestLevelExit);
-  ClassicsPlugins()->RegisterMethod(TRUE, "void", "hl_TestGameEnd", "void", &HL_TestGameEnd);
   ClassicsPlugins()->RegisterMethod(TRUE, "void", "hl_Move", "CTString", &HL_Move);
   ClassicsPlugins()->RegisterMethod(TRUE, "void", "hl_Trace", "INDEX", &HL_Trace);
   ClassicsPlugins()->RegisterMethod(TRUE, "void", "hl_TestKeys", "CTString", &HL_TestKeys);
@@ -318,29 +270,6 @@ static void DeclareUsual(void) {
 #endif // !SERIOUSHL_RUN
 
 // ------------------------------------------------------------------
-// The speedometer: the player's speed along the ground, in Half-Life's units, under the crosshair
-// ------------------------------------------------------------------
-static INDEX sr_bShowSpeed = TRUE;
-
-static void DrawSpeed(CDrawPort *pdp, CEntity *pen) {
-  if (!sr_bShowSpeed || pen == NULL || !(pen->en_ulPhysicsFlags & EPF_MOVABLE)) return;
-  const CMovableEntity *pmen = (CMovableEntity *)pen;
-  const FLOAT3D v = pmen->en_vCurrentTranslationAbsolute;
-  const FLOAT3D vUp = -pmen->en_vGravityDir;
-  const FLOAT fSpeed = (v - vUp * (v % vUp)).Length() / hl::_settings.fUnit;
-  const FLOAT fScale = pdp->GetHeight() / 720.0f;
-  pdp->SetFont(_pfdConsoleFont);
-  pdp->SetTextAspect(1.0f);
-  pdp->SetTextScaling(fScale * 1.5f);
-  CTString str;
-  str.PrintF("%d", (INDEX)floorf(fSpeed + 0.5f));
-  const PIX pixX = pdp->GetWidth() / 2;
-  const PIX pixY = pdp->GetHeight() / 2 + (PIX)(60 * fScale);
-  pdp->PutTextC(str, pixX + 1, pixY + 1, 0x000000A0);
-  pdp->PutTextC(str, pixX, pixY, fSpeed > hl::_settings.fMaxSpeed * 1.05f ? 0x80FF80E0 : 0xFFFFFFC0);
-};
-
-// ------------------------------------------------------------------
 // Events
 // ------------------------------------------------------------------
 static void HL_OnStep(void) {
@@ -353,12 +282,10 @@ static void HL_OnStep(void) {
   TestTick(pen);
 #endif
   movement::Track(pen);
-  speedrun::Step(pen);
 };
 
 static void HL_OnFrame(CDrawPort *pdp) {
   devhook::Poll();
-  speedrun::Frame();
 };
 
 static void HL_OnPostDraw(CDrawPort *pdp) {
@@ -369,8 +296,6 @@ static void HL_OnPostDraw(CDrawPort *pdp) {
 #else
   weapons::Draw(pdp, pen);
 #endif
-  DrawSpeed(pdp, pen);
-  speedrun::Draw(pdp);
 };
 
 static void HL_OnPlayerAction(INDEX iClient, INDEX iPlayer, CPlayerAction &pa, INDEX iResent) {
@@ -395,17 +320,6 @@ static void HL_OnGameStop(void) {
 #endif
 };
 
-static void HL_OnGameStart(void) {
-  speedrun::OnGameStart();
-};
-
-static void HL_OnChangeLevel(void) {
-  speedrun::OnChangeLevel();
-};
-
-static void HL_OnGameLoad(const CTFileName &fnmSave) {
-  speedrun::OnGameLoad();
-};
 
 CLASSICSPATCH_PLUGIN_STARTUP(HIniConfig props, PluginEvents_t &events) {
   events.m_processing->OnStep = &HL_OnStep;
@@ -414,9 +328,6 @@ CLASSICSPATCH_PLUGIN_STARTUP(HIniConfig props, PluginEvents_t &events) {
   events.m_packet->OnPlayerAction = &HL_OnPlayerAction;
   events.m_world->OnWorldLoad = &HL_OnWorldLoad;
   events.m_game->OnGameStop = &HL_OnGameStop;
-  events.m_game->OnGameStart = &HL_OnGameStart;
-  events.m_game->OnChangeLevel = &HL_OnChangeLevel;
-  events.m_game->OnGameLoad = &HL_OnGameLoad;
 
   ClassicsPlugins()->RegisterMethod(TRUE, "void", "hl_Status", "void", &HL_Status);
   ClassicsPlugins()->RegisterMethod(TRUE, "void", "hl_Where", "void", &HL_Where);
@@ -429,9 +340,7 @@ CLASSICSPATCH_PLUGIN_STARTUP(HIniConfig props, PluginEvents_t &events) {
 #endif
 
   devhook::Init("SERIOUSBRIDGE_DEV");
-  // the speedrun tools (both builds; they change nothing in the game): timer, LiveSplit, speedometer
-  speedrun::Init();
-  _pShell->DeclareSymbol("persistent user INDEX sr_bShowSpeed;", &sr_bShowSpeed);
+  // (the timer, LiveSplit and the speedometer: SeriousSpeedrun, a plugin of its own)
   const BOOL bHooked = hl::Init();
 #ifndef SERIOUSHL_RUN
   // (the speedrun build is the movement only, as its category is)
@@ -442,7 +351,6 @@ CLASSICSPATCH_PLUGIN_STARTUP(HIniConfig props, PluginEvents_t &events) {
 };
 
 CLASSICSPATCH_PLUGIN_SHUTDOWN(HIniConfig props) {
-  speedrun::Shutdown();
   devhook::Shutdown();
   hl::Release();
 };

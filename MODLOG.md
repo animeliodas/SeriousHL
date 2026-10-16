@@ -93,3 +93,5 @@ Route: rules rewritten in the host (pattern "guest's rules headless"), on the Se
 
 - 2026-10-16: 0.4.0 — the speedrun tools (core Speedrun: RTA/IGT timer, LiveSplit; the speedometer), the jump while
   ducked. Oracle `test_speedrun.py` 7/7 TFE and TSE.
+- 2026-10-16: 0.4.1 — the timer, LiveSplit and the speedometer moved out into their own plugin, SeriousSpeedrun (for
+  runs of the game as it is too); SeriousHL keeps the jump while ducked (`test_hl.py duckhold`).

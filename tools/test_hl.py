@@ -11,6 +11,7 @@ Each check starts the level afresh, holds keys and turns the view through the pl
   stop     keys let go at 320 u/s: Half-Life's friction stops him in ~0.53 s after ~2 m (Sam's own: ~0.2 s);
   jump     a jump from standing: 45 units up (1.34 m at 1 u = 2.97 cm), ~0.67 s in the air;
   duckjump a jump, then duck in the air: the feet clear 63 units (1.87 m);
+  duckhold jump and duck held together: a jump, ducked (Sam alone just stood up);
   ducktap  duck on the ground, let go within 0.4 s: popped up 18 units without a jump;
   duckspeed walking ducked: 133 u/s;
   bhop     hopping on (jump held), strafing right and turning right 15 degrees a tick: speed builds past 1.7x the
@@ -39,7 +40,7 @@ UNIT = 1.9 / 64.0
 
 class Hung(Exception):
     pass
-ALL = ("run", "stop", "jump", "duckjump", "ducktap", "duckspeed", "rocketjump", "bhop", "bhopcap", "sam")
+ALL = ("run", "stop", "jump", "duckjump", "duckhold", "ducktap", "duckspeed", "rocketjump", "bhop", "bhopcap", "sam")
 
 
 class Game:
@@ -225,6 +226,16 @@ def check_duckjump(game, results):
     results.append(("duckjump: a jump with a duck in the air clears 63 units (1.87 m)", ok, f"feet {rise:.3f} m up, ducked in the air {ducked}"))
 
 
+def check_duckhold(game, results):
+    # jump and duck held together (Sam's controls add them into one number: up - down = nothing): he jumps, ducked
+    rows = scripted(game, 30, "jd24")
+    rise = max(r["y"] for r in rows) - rows[0]["y"]
+    ducked_air = any(r["ducked"] and r["ground"] == 0 for r in rows)
+    jumps = int(sum(r["jumped"] for r in rows))
+    ok = jumps >= 1 and ducked_air and rise > 1.5
+    results.append(("duckhold: jump and duck held together jump ducked", ok, f"{jumps} jumps, ducked in the air {ducked_air}, feet {rise:.2f} m up"))
+
+
 def check_ducktap(game, results):
     # duck on the ground and let go before the duck is done (0.4 s): the standing hull pops up 18 units (0.53 m)
     rows = scripted(game, 20, "d3,-17")
@@ -289,7 +300,7 @@ def main() -> None:
     HANG.unlink(missing_ok=True)
     if a.launch:
         launch(game)
-    checks = {"run": check_run, "stop": check_stop, "jump": check_jump, "duckjump": check_duckjump, "ducktap": check_ducktap,
+    checks = {"run": check_run, "stop": check_stop, "jump": check_jump, "duckjump": check_duckjump, "duckhold": check_duckhold, "ducktap": check_ducktap,
               "duckspeed": check_duckspeed, "rocketjump": check_rocketjump, "bhop": check_bhop, "bhopcap": check_bhopcap,
               "sam": check_sam}
     results = []
