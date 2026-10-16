@@ -8,11 +8,13 @@
  *   knife (TSE chainsaw) -> crowbar      colt -> .357 Python          double colt -> Glock 9mm
  *   shotguns -> shotgun (6 / 12 pellets) tommygun -> MP5 (+ grenade)   rocket launcher -> RPG
  *   grenade launcher -> hand grenades     laser -> gauss (charged shot pushes you back)
- * The rest (minigun, cannon, TSE flamer and sniper) stay Sam's.
+ *   minigun -> egon (the beam)            cannon -> satchel charges     TSE sniper rifle -> crossbow (Sam's scope)
+ * TSE's flamer stays Sam's.
  *
- * Ammo: what Sam picks up is the reserve (bullets for the Glock and MP5, shells, rockets, grenades, electricity for the
- * gauss; the Python has Sam's colt's endless ammo); the magazines are Half-Life's. Numbers: the Half-Life SDK's skill
- * defaults (sk_plr_*) and its weapons' fire rates.
+ * Ammo: what Sam picks up is the reserve (bullets for the Glock, MP5 and egon, shells, rockets, grenades, electricity
+ * for the gauss, cannon balls for satchels, sniper bullets for bolts; the Python has Sam's colt's endless ammo); the
+ * magazines are Half-Life's. Numbers: the Half-Life SDK's skill defaults (sk_plr_*) and its weapons' fire rates.
+ * Sounds: Half-Life's own when the installer took them from the player's Half-Life, else Sam's.
  */
 #ifndef SERIOUSHL_WEAPONS_H
 #define SERIOUSHL_WEAPONS_H
@@ -34,6 +36,8 @@ void Draw(CDrawPort *pdp, CEntity *penPlayer);
 CTString Status(CEntity *penPlayer);
 // Dev: the current gun's model's animations into the console.
 void DumpAnims(CEntity *penPlayer);
+// Plugin shutdown: Half-Life's sounds let go.
+void FreeSounds(void);
 
 }; // namespace
 

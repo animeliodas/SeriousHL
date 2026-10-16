@@ -10,8 +10,12 @@ at a target, its health):
   rate     the MP5 held 2 s fires every 0.1 s (~20 shots); the Glock every 0.3 s;
   clip     the .357 held: 6 shots, then a 2 s reload, then fires again;
   gauss    the gauss charged 2 s and let go: 100 damage and a push back of 500 u/s along the ground;
-  sounds   every gun plays Half-Life's own sounds (needs them taken from the player's Half-Life: install.ps1 -AssetsOnly);
-  hev      Half-Life's armour: 80% of a hit on it, a point of it stops two, none for falls; Sam's back with hl_bHevArmor 0.
+  sounds   every gun plays Half-Life's own sounds (needs them taken from the player's Half-Life: install.ps1 -AssetsOnly),
+           and they come out: Windows' meter of the game's audio session (audio_meter.ps1) at a .357 shot vs the quiet;
+  hev      Half-Life's armour: 80% of a hit on it, a point of it stops two, none for falls; Sam's back with hl_bHevArmor 0;
+  egon     the egon (on the minigun) held 0.5 s: 14 damage and a cell every 0.1 s, the beam off on letting go;
+  satchel  a satchel (on the cannon) waits past Sam's 3 s fuse, then the first fire sets it off: damage at the target;
+  crossbow (TSE, on the sniper rifle) one bolt: 50.
 Prints PASS/FAIL per check.
 """
 import argparse
@@ -20,12 +24,15 @@ import re
 import time
 
 import test_hl
+import test_loudness
 
-ALL = ("damage", "crowbar", "rate", "clip", "gauss", "sounds", "hev")
+ALL = ("damage", "crowbar", "rate", "clip", "gauss", "sounds", "hev", "egon", "satchel", "crossbow")
 UNIT = test_hl.UNIT
 # Sam's WeaponType and the key slots: TFE / TSE
-SAM = {"tfe": {"knife": (1, 1), "colt": (2, 2), "doublecolt": (3, 2), "shotgun": (4, 3), "tommygun": (6, 4), "laser": (14, 8)},
-       "tse": {"knife": (1, 1), "colt": (2, 2), "doublecolt": (3, 2), "shotgun": (4, 3), "tommygun": (6, 4), "laser": (12, 7)}}
+SAM = {"tfe": {"knife": (1, 1), "colt": (2, 2), "doublecolt": (3, 2), "shotgun": (4, 3), "tommygun": (6, 4), "laser": (14, 8),
+               "minigun": (7, 4), "cannon": (16, 9)},
+       "tse": {"knife": (1, 1), "colt": (2, 2), "doublecolt": (3, 2), "shotgun": (4, 3), "tommygun": (6, 4), "laser": (12, 7),
+               "minigun": (7, 4), "cannon": (14, 8), "sniper": (13, 6)}}
 
 
 class Guns:
@@ -68,6 +75,14 @@ class Guns:
         time.sleep(wait)
         h1 = self.health()
         return None if h0 is None or h1 is None else h0 - h1
+
+    def status(self) -> dict:
+        out = self.game.run("hl_Status();", want="weapons")
+        m = re.findall(r"clip (-?\d+), reserve (-?\d+)(, charging)?(, beam on)?; (\d+) satchels out; (\d+) shots", out)
+        if not m:
+            return {}
+        c = m[-1]
+        return {"clip": int(c[0]), "reserve": int(c[1]), "beam": bool(c[3]), "satchels": int(c[4]), "shots": int(c[5])}
 
     def shots(self) -> int:
         out = self.game.run("hl_Status();", want="weapons")
@@ -152,7 +167,70 @@ def check_sounds(game, guns, results):
     out = game.run("hl_Status();", want="sounds:")
     m = re.findall(r"sounds: (\d+) Half-Life's, (\d+) Sam's", out)
     hl, sam = (int(m[-1][0]), int(m[-1][1])) if m else (0, -1)
-    results.append(("sounds: Half-Life's own (from the player's Half-Life) for every gun", hl >= 6 and sam == 0, f"{hl} Half-Life's, {sam} Sam's"))
+    # (asked for is not heard: Sam's guns leave their sound objects muted)
+    quiet, loud = 0.0, 0.0
+    if guns.take("colt"):
+        quiet, loud, _ = test_loudness.loudness(game)
+    heard = loud >= 0.02 and loud >= 3 * max(quiet, 0.002)
+    results.append(("sounds: Half-Life's own (from the player's Half-Life) for every gun, heard", hl >= 6 and sam == 0 and heard,
+                    f"{hl} Half-Life's, {sam} Sam's; a .357 shot peaks {loud:.3f} over the quiet {quiet:.3f}"))
+
+
+def check_egon(game, guns, results):
+    guns.spawn("Boneman", 5.0)
+    if not guns.take("minigun"):
+        results.append(("egon", False, "no minigun"))
+        return
+    h0 = guns.health()
+    time.sleep(0.3)
+    guns.health()
+    s0 = guns.status()
+    mark = len(game.text())
+    game.run("hl_iTestFire=10;")  # 0.5 s (a Boneman has 125)
+    time.sleep(1.5)
+    s1 = guns.status()
+    h1 = guns.health()
+    log = game.text()[mark:]
+    on, off = log.find("egon on"), log.find("egon off")
+    pulses = s1.get("shots", 0) - s0.get("shots", 0)
+    cells = s0.get("reserve", 0) - s1.get("reserve", 0)
+    lost = None if h0 is None or h1 is None else h0 - h1
+    ok = 0 <= on < off and not s1.get("beam") and 4 <= pulses <= 6 and cells == pulses and lost is not None \
+        and abs(lost - 14 * pulses) < 0.5
+    results.append(("egon: 14 damage and a cell every 0.1 s while held, off when let go", ok,
+                    f"beam {'on, then off' if 0 <= on < off else 'not on and off'}; {pulses} pulses, {cells} cells, target lost {lost}"))
+
+
+def check_satchel(game, guns, results):
+    guns.spawn("Boneman", 4.0)
+    if not guns.take("cannon"):
+        results.append(("satchel", False, "no cannon"))
+        return
+    h0 = guns.health()
+    game.run("hl_iTestFire=1;")
+    time.sleep(4.5)  # past Sam's grenade fuse (3 s)
+    out = guns.status().get("satchels")
+    h1 = guns.health()
+    game.run("hl_iTestFire=1;")
+    time.sleep(1.5)
+    after = guns.status().get("satchels")
+    h2 = guns.health()
+    waited = h0 is not None and h1 == h0
+    # (gone: killed by it)
+    lost = None if h1 is None else h1 - (h2 if h2 is not None else 0.0)
+    ok = out == 1 and waited and after == 0 and lost is not None and 0 < lost <= 150
+    results.append(("satchel: no fuse, the first fire sets it off (up to 150 over 2.5 x 150 u)", ok,
+                    f"{out} out after 4.5 s, target {'untouched' if waited else 'hit'} meanwhile; set off: {after} out, target lost {lost}"))
+
+
+def check_crossbow(game, guns, results):
+    if "sniper" not in guns.sam:
+        results.append(("crossbow: TSE's sniper rifle only (none in TFE)", True, "skipped"))
+        return
+    guns.spawn()
+    lost = guns.shot() if guns.take("sniper") else None
+    st = guns.status()
+    results.append(("crossbow: a bolt takes 50, the clip 5", lost == 50 and st.get("clip") == 4, f"lost {lost}, clip {st.get('clip')}"))
 
 
 def hit(game, args: str):
@@ -203,7 +281,8 @@ def main() -> None:
     if a.launch:
         test_hl.launch(game)
     checks = {"damage": check_damage, "crowbar": check_crowbar, "rate": check_rate, "clip": check_clip, "gauss": check_gauss,
-              "sounds": check_sounds, "hev": check_hev}
+              "sounds": check_sounds, "hev": check_hev, "egon": check_egon, "satchel": check_satchel,
+              "crossbow": check_crossbow}
     results = []
     for name in a.only.split(","):
         try:

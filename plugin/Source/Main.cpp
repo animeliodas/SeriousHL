@@ -365,4 +365,7 @@ CLASSICSPATCH_PLUGIN_STARTUP(HIniConfig props, PluginEvents_t &events) {
 CLASSICSPATCH_PLUGIN_SHUTDOWN(HIniConfig props) {
   devhook::Shutdown();
   hl::Release();
+#ifndef SERIOUSHL_RUN
+  weapons::FreeSounds();
+#endif
 };

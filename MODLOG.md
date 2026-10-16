@@ -115,3 +115,18 @@ Route: rules rewritten in the host (pattern "guest's rules headless"), on the Se
 
 - 2026-10-16: Half-Life's weapon sounds from the player's Half-Life (`install.ps1` asset step, `-AssetsOnly`); the HEV
   armour (`Hev.cpp`, `hl_bHevArmor`). Oracle `test_weapons.py sounds,hev,gauss` TFE and TSE PASS.
+30. Sam's guns set their sound object's 3D parameters before each sound (`Set3DParameters(25, 1, 1.5, 1)` for a shot)
+    and leave them as they were: the tommygun and the minigun end on "mute fire" (volume 0), the laser on pitch 0.31.
+    A sound played into the object without setting them is silent - while the plugin's own counter said "played".
+    Now the plugin sets them every time. Oracle: Windows' audio session meter of the game process
+    (`tools/audio_meter.ps1`, IAudioMeterInformation), a .357 shot against the quiet (`test_weapons.py sounds`).
+31. The sound's data is held by the plugin (`_pSoundStock->Obtain_t`, released at shutdown) and played with
+    `CSoundObject::Play` - `CEntity::PlaySound(file)` releases the data right after starting it.
+32. Egon: single player's wide beam (`m_fireMode = FIRE_WIDE`), 14 (`sk_plr_egon_wide`) and a cell every 0.1 s, the
+    first after 0.1 s; windup, the run loop after 2 s, off. Satchel: Sam's grenade (`FireGrenade`) turned: no fuse (its
+    `wait(m_fFlyTime)` timer moved an hour on; set off by moving it to now), desired translation 0 (it stops instead of
+    going off when stuck), debris collision (only brushes stop it, nothing sets it off), 150 over 2.5 × 150 units.
+    Crossbow: TSE's `FireSniperBullet`, 50 (`sk_plr_xbow_bolt_monster`), from the view's middle while scoped.
+33. Rare flake: once in four runs the gauss's single shot counted 40 on the target (twice 20).
+- 2026-10-16: egon (minigun), satchel (cannon), crossbow (TSE sniper); the HL sounds really heard (3D parameters).
+  `test_weapons.py` 10/10 TSE; TFE 9/9 + crossbow n/a.

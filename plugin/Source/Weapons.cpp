@@ -5,8 +5,10 @@
 #include "HlMove.h"
 #include "Movement.h"
 #include "Player.h"
+#include "Physics.h"
 #include "SBridge.h"
 
+#include <Engine/Templates/Stock_CSoundData.h>
 #include <Extras/XGizmo/Objects/StructPtr.h>
 #include <stdio.h>
 #include <map>
@@ -29,20 +31,31 @@ static const ULONG PW_SHELLS = (402UL << 8) | 42;
 static const ULONG PW_ROCKETS = (402UL << 8) | 44;
 static const ULONG PW_GRENADES = (402UL << 8) | 46;
 static const ULONG PW_ELECTRICITY = (402UL << 8) | 50;
+static const ULONG PW_IRONBALLS = (402UL << 8) | 52;
+static const ULONG PW_SNIPERBULLETS = (402UL << 8) | 54; // (TSE)
+static const ULONG PW_SNIPING = (402UL << 8) | 236;      // m_bSniping (TSE): looking through the scope
+// Projectile.es (class 501), the same in both
+static const ULONG PJ_DAMAGE = (501UL << 8) | 14, PJ_RANGEDAMAGE = (501UL << 8) | 15;
+static const ULONG PJ_HOTSPOT = (501UL << 8) | 16, PJ_FALLOFF = (501UL << 8) | 17;
+// Sam's debris (Flags.h ECF_DEBRIS): only brushes stop it, nothing goes off on touching it
+static const ULONG ECF_SATCHEL = ((1UL << 0) << ECB_TEST) | ((1UL << 5) << ECB_IS);
 // sound components of PlayerWeapons.es (their numbers there)
 enum { SND_KNIFE_HIGH = 24, SND_KNIFE_LONG = 25, SND_COLT_FIRE = 37, SND_COLT_RELOAD = 38, SND_SHOTGUN_FIRE = 46,
   SND_DOUBLESHOTGUN_FIRE = 60, SND_DOUBLESHOTGUN_RELOAD = 61, SND_TOMMYGUN_FIRE = 74, SND_ROCKET_FIRE = 97,
-  SND_GRENADE_FIRE = 106, SND_LASER_FIRE = 146 };
+  SND_GRENADE_FIRE = 106, SND_LASER_FIRE = 146, SND_MINIGUN_ROTATE = 86, SND_MINIGUN_SPINUP = 87,
+  SND_MINIGUN_SPINDOWN = 88, SND_SNIPER_FIRE = 113 /* TSE */ };
 static const INDEX FLARE_ADD = 2;
 // Player.es buttons
 static const ULONG PLACT_FIRE = 1UL << 0, PLACT_RELOAD = 1UL << 1, PLACT_USE = 1UL << 5, PLACT_COMPUTER = 1UL << 6;
 // Sam's weapons (WeaponType)
 #if SE1_GAME == SS_TFE
 enum { W_KNIFE = 1, W_COLT = 2, W_DOUBLECOLT = 3, W_SINGLESHOTGUN = 4, W_DOUBLESHOTGUN = 5, W_TOMMYGUN = 6,
-  W_ROCKETLAUNCHER = 8, W_GRENADELAUNCHER = 9, W_LASER = 14, W_CHAINSAW = -100 };
+  W_MINIGUN = 7, W_ROCKETLAUNCHER = 8, W_GRENADELAUNCHER = 9, W_LASER = 14, W_IRONCANNON = 16, W_CHAINSAW = -100,
+  W_SNIPER = -101 };
 #else
 enum { W_KNIFE = 1, W_COLT = 2, W_DOUBLECOLT = 3, W_SINGLESHOTGUN = 4, W_DOUBLESHOTGUN = 5, W_TOMMYGUN = 6,
-  W_ROCKETLAUNCHER = 8, W_GRENADELAUNCHER = 9, W_CHAINSAW = 10, W_LASER = 12 };
+  W_MINIGUN = 7, W_ROCKETLAUNCHER = 8, W_GRENADELAUNCHER = 9, W_CHAINSAW = 10, W_LASER = 12, W_SNIPER = 13,
+  W_IRONCANNON = 14 };
 #endif
 
 // --- Sam's fire functions (CPlayerWeapons, Entities library)
@@ -53,6 +66,7 @@ typedef void (CEntity::*FVoid)(void);
 typedef void (CEntity::*FIndex)(INDEX i);
 typedef void (CEntity::*FFloat)(FLOAT f);
 typedef void (CEntity::*FFlare)(INDEX iFlare, INDEX iState);
+typedef void (CEntity::*FFireSniperBullet)(FLOAT fX, FLOAT fY, FLOAT fRange, FLOAT fDamage, FLOAT fImprecision);
 static FFireMachineBullet _pFireMachineBullet = NULL;
 static FFireBullets _pFireBullets = NULL;
 static FCutWithKnife _pCutWithKnife = NULL;
@@ -60,18 +74,24 @@ static FVoid _pFireRocket = NULL, _pDoRecoil = NULL;
 static FIndex _pFireGrenade = NULL;
 static FFloat _pSpawnRangeSound = NULL;
 static FFlare _pSetFlare = NULL;
+static FFireSniperBullet _pFireSniperBullet = NULL;
 static BOOL _bReady = FALSE;
 static CSymbolPtr _symFX, _symFY;
 
 // --- Half-Life's guns
-enum Gun { G_NONE, G_CROWBAR, G_PYTHON, G_GLOCK, G_SHOTGUN, G_MP5, G_RPG, G_GRENADE, G_GAUSS, G_COUNT };
-static const char *_astrGun[G_COUNT] = { "-", "crowbar", ".357", "glock", "shotgun", "mp5", "rpg", "grenade", "gauss" };
-static const INDEX _aiClip[G_COUNT] = { 0, 0, 6, 17, 8, 50, 1, 0, 0 };
-static const FLOAT _afReload[G_COUNT] = { 0, 0, 2.0f, 1.5f, 0.5f, 1.5f, 2.0f, 0, 0 }; // (shotgun: a shell)
+enum Gun { G_NONE, G_CROWBAR, G_PYTHON, G_GLOCK, G_SHOTGUN, G_MP5, G_RPG, G_GRENADE, G_GAUSS, G_EGON, G_SATCHEL,
+  G_CROSSBOW, G_COUNT };
+static const char *_astrGun[G_COUNT] = { "-", "crowbar", ".357", "glock", "shotgun", "mp5", "rpg", "grenade", "gauss",
+  "egon", "satchel", "crossbow" };
+static const INDEX _aiClip[G_COUNT] = { 0, 0, 6, 17, 8, 50, 1, 0, 0, 0, 0, 5 };
+static const FLOAT _afReload[G_COUNT] = { 0, 0, 2.0f, 1.5f, 0.5f, 1.5f, 2.0f, 0, 0, 0, 0, 4.5f }; // (shotgun: a shell)
 
 // skill.cfg sk_plr_*, in Half-Life's units; the fire functions take metres
 static const FLOAT DMG_CROWBAR = 10.0f, DMG_357 = 40.0f, DMG_9MM = 8.0f, DMG_BUCKSHOT = 5.0f, DMG_MP5 = 5.0f;
 static const FLOAT DMG_GAUSS = 20.0f, DMG_GAUSS_FULL = 200.0f;
+static const FLOAT DMG_EGON = 14.0f;      // sk_plr_egon_wide: single player's beam, every 0.1 s
+static const FLOAT DMG_SATCHEL = 150.0f;  // over 2.5 x 150 units
+static const FLOAT DMG_XBOW = 50.0f;      // sk_plr_xbow_bolt_monster
 // VECTOR_CONE_*DEGREES (sin of the half angle)
 static const FLOAT CONE_1 = 0.00873f, CONE_3 = 0.02618f, CONE_10 = 0.08716f;
 
@@ -86,6 +106,10 @@ static BOOL _bOldFire = FALSE, _bOldAlt = FALSE;
 static BOOL _bCharging = FALSE;   // gauss
 static TIME _tmChargeStart = 0, _tmChargeDrain = 0;
 static BOOL _bPinPulled = FALSE;  // hand grenade
+static BOOL _bEgonOn = FALSE;     // egon
+static TIME _tmEgonPulse = 0, _tmEgonRun = 0;
+static ULONG _aulSatchels[16];    // satchels out (Sam's grenades, their ids)
+static INDEX _ctSatchels = 0;
 static ULONG _ctShots = 0;
 static FLOAT _fLastDamage = 0;
 static const char *_strLast = "";
@@ -108,6 +132,9 @@ static Gun GunFor(INDEX iSam) {
     case W_ROCKETLAUNCHER: return G_RPG;
     case W_GRENADELAUNCHER: return G_GRENADE;
     case W_LASER: return G_GAUSS;
+    case W_MINIGUN: return G_EGON;
+    case W_IRONCANNON: return G_SATCHEL;
+    case W_SNIPER: return G_CROSSBOW;
   }
   return G_NONE;
 };
@@ -115,7 +142,9 @@ static Gun GunFor(INDEX iSam) {
 // the reserve a gun reloads from: Sam's ammo (NULL: endless, or the gun has no magazine)
 static INDEX *Reserve(CEntity *pw, Gun g) {
   switch (g) {
-    case G_GLOCK: case G_MP5: return (INDEX *)player::Prop(pw, PW_BULLETS);
+    case G_GLOCK: case G_MP5: case G_EGON: return (INDEX *)player::Prop(pw, PW_BULLETS);
+    case G_SATCHEL: return (INDEX *)player::Prop(pw, PW_IRONBALLS);
+    case G_CROSSBOW: return (INDEX *)player::Prop(pw, PW_SNIPERBULLETS);
     case G_SHOTGUN: return (INDEX *)player::Prop(pw, PW_SHELLS);
     case G_RPG: return (INDEX *)player::Prop(pw, PW_ROCKETS);
     case G_GRENADE: return (INDEX *)player::Prop(pw, PW_GRENADES);
@@ -128,21 +157,39 @@ static FLOAT FireX(INDEX iSam) { return _symFX.Exists() ? ((FLOAT *)_symFX.GetVa
 static FLOAT FireY(INDEX iSam) { return _symFY.Exists() ? ((FLOAT *)_symFY.GetValue())[iSam] : 0.0f; };
 
 // Half-Life's own sound when the installer took it from the player's Half-Life (Sounds\SeriousHL\<"weapons\x.wav">;
-// a list "a.wav|b.wav" picks one at random, as Half-Life does), else Sam's component.
-static std::map<std::string, BOOL> _mapHave;
+// a list "a.wav|b.wav" picks one at random, as Half-Life does), else Sam's component. The sound's data is kept here:
+// CEntity::PlaySound(file) lets go of it right after starting it, and the stock frees it - a sound that never comes out.
+static std::map<std::string, CSoundData *> _mapSounds;
 static ULONG _ctHLSounds = 0, _ctSamSounds = 0;
 
-static BOOL HaveSound(const CTFileName &fnm) {
-  std::map<std::string, BOOL>::iterator it = _mapHave.find(fnm.str_String);
-  if (it != _mapHave.end()) return it->second;
-  const BOOL bHave = FileExists(fnm);
-  _mapHave[fnm.str_String] = bHave;
-  return bHave;
+static CSoundData *SoundData(const CTFileName &fnm) {
+  std::map<std::string, CSoundData *>::iterator it = _mapSounds.find(fnm.str_String);
+  if (it != _mapSounds.end()) return it->second;
+  CSoundData *psd = NULL;
+  if (FileExists(fnm)) {
+    try {
+      psd = _pSoundStock->Obtain_t(fnm);
+    } catch (char *strError) {
+      CPrintF(SB_TAG " %s\n", strError);
+    }
+  }
+  _mapSounds[fnm.str_String] = psd;
+  return psd;
 };
 
-static void Sound(CEntity *pen, CEntity *pw, const char *strHL, INDEX iSound, BOOL bSecond) {
+void FreeSounds(void) {
+  for (std::map<std::string, CSoundData *>::iterator it = _mapSounds.begin(); it != _mapSounds.end(); it++) {
+    if (it->second != NULL) _pSoundStock->Release(it->second);
+  }
+  _mapSounds.clear();
+};
+
+static void Sound(CEntity *pen, CEntity *pw, const char *strHL, INDEX iSound, BOOL bSecond, ULONG ulFlags = 0) {
   CSoundObject *pso = (CSoundObject *)player::Prop(pen, bSecond ? PROP_SOUND1 : PROP_SOUND0);
   if (pso == NULL) return;
+  // Sam's guns set these before each of their sounds - and leave them muted ("mute fire": the tommygun, the minigun)
+  // or low (the laser's pitch): the object's own range, volume and pitch every time (Sam's fire: 25 m, 1.5)
+  pso->Set3DParameters(25.0f, 1.0f, bSecond ? 1.0f : 1.5f, 1.0f);
   if (strHL != NULL) {
     // one of the list
     char strList[160];
@@ -153,20 +200,17 @@ static void Sound(CEntity *pen, CEntity *pw, const char *strHL, INDEX iSound, BO
     for (char *str = strtok(strList, "|"); str != NULL && ct < 8; str = strtok(NULL, "|")) astr[ct++] = str;
     if (ct > 0) {
       const CTFileName fnm = CTString("Sounds\\SeriousHL\\") + astr[pw->IRnd() % ct];
-      if (HaveSound(fnm)) {
-        try {
-          pw->PlaySound(*pso, fnm, SOF_3D | SOF_VOLUMETRIC);
-          _ctHLSounds++;
-          return;
-        } catch (char *) {
-          _mapHave[fnm.str_String] = FALSE;
-        }
+      CSoundData *psd = SoundData(fnm);
+      if (psd != NULL) {
+        pso->Play(psd, SOF_3D | SOF_VOLUMETRIC | ulFlags);
+        _ctHLSounds++;
+        return;
       }
     }
   }
   // (a component's id is its class's with its number: (402 << 8) | n)
   if (iSound >= 0) {
-    pw->PlaySound(*pso, (402L << 8) | iSound, SOF_3D | SOF_VOLUMETRIC);
+    pw->PlaySound(*pso, (402L << 8) | iSound, SOF_3D | SOF_VOLUMETRIC | ulFlags);
     _ctSamSounds++;
   }
 };
@@ -232,6 +276,66 @@ static void Log(const char *strWhat, Gun g, INDEX iClip, INDEX iReserve) {
   CPrintF(SB_TAG " %s %s: clip %d, reserve %d\n", _astrGun[g], strWhat, iClip, iReserve);
 };
 
+// --- the egon's beam off (its loop stopped)
+static void EgonOff(CEntity *pen, CEntity *pw) {
+  if (!_bEgonOn) return;
+  _bEgonOn = FALSE;
+  Sound(pen, pw, "weapons\\egon_off1.wav", SND_MINIGUN_SPINDOWN, TRUE);
+  Log("off", G_EGON, 0, -1);
+};
+
+// --- satchels: Sam's grenades with no fuse, set off by the player
+static CEntity *Satchel(ULONG ulID) {
+  CEntity *penS = physics::FindEntity(ulID);
+  return penS != NULL && strcmp(penS->GetClass()->ec_pdecDLLClass->dec_strName, "Projectile") == 0 ? penS : NULL;
+};
+
+static INDEX Satchels(void) {
+  INDEX ct = 0;
+  for (INDEX i = 0; i < _ctSatchels; i++) {
+    if (Satchel(_aulSatchels[i]) != NULL) _aulSatchels[ct++] = _aulSatchels[i];
+  }
+  return _ctSatchels = ct;
+};
+
+static BOOL ThrowSatchel(CEntity *pen, CEntity *pw) {
+  CWorld *pwo = IWorld::GetWorld();
+  if (_pFireGrenade == NULL || pwo == NULL || _ctSatchels >= (INDEX)ARRAYCOUNT(_aulSatchels)) return FALSE;
+  const ULONG ulFirst = pwo->wo_ulNextEntityID;
+  (pw->*_pFireGrenade)(0);
+  CEntity *penS = NULL;
+  FOREACHINDYNAMICCONTAINER(pwo->wo_cenEntities, CEntity, iten) {
+    if (iten->en_ulID >= ulFirst && strcmp(iten->GetClass()->ec_pdecDLLClass->dec_strName, "Projectile") == 0) {
+      penS = &*iten;
+      break;
+    }
+  }
+  if (penS == NULL) return FALSE;
+  // thrown at 274 u/s plus the player's own speed; it goes off on nothing it meets, comes to rest and waits
+  CMovableEntity *pmS = (CMovableEntity *)penS;
+  pmS->en_vCurrentTranslationAbsolute = Forward(pen) * (274.0f * Unit()) + ((CMovableEntity *)pen)->en_vCurrentTranslationAbsolute;
+  pmS->en_vDesiredTranslationRelative = FLOAT3D(0, 0, 0);
+  penS->SetCollisionFlags(ECF_SATCHEL);
+  // RadiusDamage(150, 2.5 x 150 units): from the middle down to nothing at the edge
+  FLOAT *pf;
+  if ((pf = (FLOAT *)player::Prop(penS, PJ_DAMAGE)) != NULL) *pf = 0.0f;
+  if ((pf = (FLOAT *)player::Prop(penS, PJ_RANGEDAMAGE)) != NULL) *pf = DMG_SATCHEL;
+  if ((pf = (FLOAT *)player::Prop(penS, PJ_HOTSPOT)) != NULL) *pf = 0.1f;
+  if ((pf = (FLOAT *)player::Prop(penS, PJ_FALLOFF)) != NULL) *pf = 2.5f * DMG_SATCHEL * Unit();
+  // (its fly time is the timer of the state it waits in)
+  ((CRationalEntity *)penS)->SetTimerAfter(3600.0f);
+  _aulSatchels[_ctSatchels++] = penS->en_ulID;
+  return TRUE;
+};
+
+static void Detonate(void) {
+  for (INDEX i = 0; i < _ctSatchels; i++) {
+    CEntity *penS = Satchel(_aulSatchels[i]);
+    if (penS != NULL) ((CRationalEntity *)penS)->SetTimerAfter(0.05f);
+  }
+  _ctSatchels = 0;
+};
+
 // --- every action of the tracked player, before Player.es applies it
 static void Filter(CEntity *pen, CPlayerAction &pa);
 
@@ -256,6 +360,7 @@ static void StartReload(CEntity *pen, CEntity *pw, Gun g, GunState &gs, TIME tmN
   else if (g == G_PYTHON) Sound(pen, pw, "weapons\\357_reload1.wav", SND_COLT_RELOAD, TRUE);
   else if (g == G_GLOCK) Sound(pen, pw, "items\\9mmclip1.wav", SND_COLT_RELOAD, TRUE);
   else if (g == G_MP5) Sound(pen, pw, "items\\clipinsert1.wav", -1, TRUE);
+  else if (g == G_CROSSBOW) Sound(pen, pw, "weapons\\xbow_reload1.wav", -1, TRUE);
   Log("reload", g, gs.iClip, piReserve != NULL ? *piReserve : -1);
 };
 
@@ -272,9 +377,13 @@ static void FinishReload(CEntity *pw, Gun g, GunState &gs, TIME tmNow) {
 };
 
 static void Filter(CEntity *pen, CPlayerAction &pa) {
-  if (!_bReady || !hl_bWeapons || !(pen->GetFlags() & ENF_ALIVE)) return;
+  if (!_bReady) return;
   CEntity *pw = player::PropEntity(pen, PROP_WEAPONS);
   if (pw == NULL) return;
+  if (!hl_bWeapons || !(pen->GetFlags() & ENF_ALIVE)) {
+    EgonOff(pen, pw);
+    return;
+  }
   const INDEX iSam = player::PropIndex(pw, PW_CURRENT, 0);
   const INDEX iWanted = player::PropIndex(pw, PW_WANTED, 0);
   const Gun g = GunFor(iSam);
@@ -283,13 +392,15 @@ static void Filter(CEntity *pen, CPlayerAction &pa) {
   if (g == G_NONE) {
     _iLastSam = iSam;
     _bCharging = FALSE;
+    EgonOff(pen, pw);
     return;
   }
   // Sam's own firing and reloading are out; the right mouse button doesn't open Netricsa
   const BOOL bFire = (pa.pa_ulButtons & PLACT_FIRE) != 0;
   const BOOL bReloadKey = (pa.pa_ulButtons & PLACT_RELOAD) != 0;
   pa.pa_ulButtons &= ~(PLACT_FIRE | PLACT_RELOAD);
-  if (bAlt) pa.pa_ulButtons &= ~(PLACT_USE | PLACT_COMPUTER);
+  // (the crossbow's second fire is Sam's scope: the button stays)
+  if (bAlt && g != G_CROSSBOW) pa.pa_ulButtons &= ~(PLACT_USE | PLACT_COMPUTER);
 
   const TIME tmNow = _pTimer->CurrentTick();
   GunState &gs = _aGuns[g];
@@ -297,6 +408,7 @@ static void Filter(CEntity *pen, CPlayerAction &pa) {
   if (iSam != iWanted) {
     _bCharging = FALSE;
     _bPinPulled = FALSE;
+    EgonOff(pen, pw);
     return;
   }
   if (iSam != _iLastSam) {
@@ -476,6 +588,65 @@ static void Filter(CEntity *pen, CPlayerAction &pa) {
       Log("fire", g, 0, *piReserve);
     }
     } break;
+  case G_EGON:
+    // single player's wide beam: 14 damage and a cell every 0.1 s (the first after 0.1 s), the run loop after 2 s
+    if (bFire && iReserve > 0) {
+      if (!_bEgonOn) {
+        _bEgonOn = TRUE;
+        _tmEgonPulse = tmNow + 0.1f;
+        _tmEgonRun = tmNow + 2.0f;
+        Sound(pen, pw, "weapons\\egon_windup2.wav", SND_MINIGUN_SPINUP, TRUE);
+        Log("on", g, 0, iReserve);
+      }
+      if (Due(tmNow, _tmEgonPulse)) {
+        Bullet(pw, iSam, 2048.0f, DMG_EGON, 0.0f);
+        if (piReserve != NULL) (*piReserve)--;
+        _tmEgonPulse = tmNow + 0.1f;
+        Noise(pw, 50.0f);
+      }
+      if (_tmEgonRun > 0 && Due(tmNow, _tmEgonRun)) {
+        Sound(pen, pw, "weapons\\egon_run3.wav", SND_MINIGUN_ROTATE, TRUE, SOF_LOOP);
+        _tmEgonRun = 0;
+      }
+    } else {
+      EgonOff(pen, pw);
+    }
+    break;
+  case G_SATCHEL: {
+    // the first fire throws one, or sets off those out; the second throws another
+    const INDEX ctOut = Satchels();
+    if (bFire && ctOut > 0 && Due(tmNow, gs.tmNext)) {
+      Detonate();
+      gs.tmNext = tmNow + 0.5f;
+      _ctShots++;
+      _fLastDamage = DMG_SATCHEL;
+      Log("detonate", g, ctOut, iReserve);
+    } else if ((bFire || bAlt) && Due(tmNow, gs.tmNext) && iReserve > 0 && ThrowSatchel(pen, pw)) {
+      if (piReserve != NULL) (*piReserve)--;
+      gs.tmNext = tmNow + 1.0f;
+      Anim(pw, "Fire");
+      Log("throw", g, _ctSatchels, piReserve != NULL ? *piReserve : -1);
+    }
+    } break;
+  case G_CROSSBOW:
+    // a bolt (Sam's sniper bullet), 0.75 s apart, 5 in the clip; through the scope from the middle of the view
+    if (bFire && Due(tmNow, gs.tmNext) && gs.iClip > 0) {
+      const BOOL bScope = player::PropIndex(pw, PW_SNIPING, 0) != 0;
+      if (_pFireSniperBullet != NULL) {
+        (pw->*_pFireSniperBullet)(bScope ? 0.0f : FireX(iSam), bScope ? 0.0f : FireY(iSam), 8192.0f * Unit(), DMG_XBOW, 0.0f);
+        _ctShots++;
+        _fLastDamage = DMG_XBOW;
+      } else {
+        Bullet(pw, iSam, 8192.0f, DMG_XBOW, 0.0f);
+      }
+      gs.iClip--;
+      gs.tmNext = tmNow + 0.75f;
+      Sound(pen, pw, "weapons\\xbow_fire1.wav", SND_SNIPER_FIRE, FALSE);
+      Anim(pw, "Fire");
+      Noise(pw, 30.0f);
+      Log("fire", g, gs.iClip, iReserve);
+    }
+    break;
   }
   _bOldFire = bFire;
   _bOldAlt = bAlt;
@@ -497,6 +668,7 @@ BOOL Init(void) {
   Find(_pDoRecoil, "?DoRecoil@CPlayerWeapons@@QAEXXZ");
   Find(_pSpawnRangeSound, "?SpawnRangeSound@CPlayerWeapons@@QAEXM@Z");
   Find(_pSetFlare, "?SetFlare@CPlayerWeapons@@QAEXJJ@Z");
+  Find(_pFireSniperBullet, "?FireSniperBullet@CPlayerWeapons@@QAEXMMMMM@Z"); // (TSE)
   _symFX.Find("wpn_fFX");
   _symFY.Find("wpn_fFY");
   Reset();
@@ -515,6 +687,8 @@ void Reset(void) {
   _bCharging = FALSE;
   _bPinPulled = FALSE;
   _bOldFire = _bOldAlt = FALSE;
+  _bEgonOn = FALSE;
+  _ctSatchels = 0;
 };
 
 void Draw(CDrawPort *pdp, CEntity *pen) {
@@ -527,6 +701,8 @@ void Draw(CDrawPort *pdp, CEntity *pen) {
   const GunState &gs = _aGuns[g];
   if (g == G_GAUSS && _bCharging) {
     _snprintf(str, sizeof(str), "%s %3.0f%%", _astrGun[g], Min((_pTimer->CurrentTick() - _tmChargeStart) / 4.0f, 1.0f) * 100.0f);
+  } else if (g == G_SATCHEL && _ctSatchels > 0) {
+    _snprintf(str, sizeof(str), "%s %d out", _astrGun[g], _ctSatchels);
   } else if (_aiClip[g] > 0) {
     _snprintf(str, sizeof(str), "%s %d%s", _astrGun[g], gs.iClip, gs.tmReloaded > 0 ? " reloading" : "");
   } else {
@@ -548,9 +724,12 @@ CTString Status(CEntity *pen) {
   CEntity *pw = pen != NULL ? player::PropEntity(pen, PROP_WEAPONS) : NULL;
   const INDEX iSam = pw != NULL ? player::PropIndex(pw, PW_CURRENT, 0) : -1;
   const Gun g = GunFor(iSam);
-  str.PrintF("weapons %s; in hand Sam's %d = %s, clip %d%s; %u shots (last %.0f damage, %s); sounds: %u Half-Life's, %u Sam's",
+  const INDEX *piReserve = pw != NULL ? Reserve(pw, g) : NULL;
+  str.PrintF("weapons %s; in hand Sam's %d = %s, clip %d, reserve %d%s%s; %d satchels out; %u shots (last %.0f damage, %s); sounds: %u Half-Life's, %u Sam's",
     !_bReady ? "unavailable" : hl_bWeapons ? "Half-Life's" : "Sam's",
-    iSam, _astrGun[g], _aGuns[g].iClip, _bCharging ? ", charging" : "", _ctShots, _fLastDamage, _strLast, _ctHLSounds, _ctSamSounds);
+    iSam, _astrGun[g], _aGuns[g].iClip, piReserve != NULL ? *piReserve : -1, _bCharging ? ", charging" : "",
+    _bEgonOn ? ", beam on" : "", _ctSatchels, _ctShots,
+    _fLastDamage, _strLast, _ctHLSounds, _ctSamSounds);
   return str;
 };
 
