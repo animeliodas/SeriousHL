@@ -6,6 +6,7 @@
 #include "Sounds.h"
 #include "Grenades.h"
 #include "Tripmine.h"
+#include "Hud.h"
 #include "HlMove.h"
 #include "Movement.h"
 #include "Player.h"
@@ -117,6 +118,7 @@ struct GunState {
 static GunState _aGuns[G_COUNT];
 static INDEX _iLastSam = -1;
 static Gun _gLastGun = G_NONE;
+static BOOL _bPickupsKnown = FALSE; // (the pickups' last counts taken: Pickups())
 static BOOL _bOldFire = FALSE, _bOldAlt = FALSE;
 static BOOL _bCharging = FALSE;   // gauss
 static TIME _tmChargeStart = 0, _tmChargeDrain = 0;
@@ -1016,6 +1018,7 @@ void Reset(void) {
   }
   _iLastSam = -1;
   _gLastGun = G_NONE;
+  _bPickupsKnown = FALSE;
   _bCharging = FALSE;
   _bPinPulled = FALSE;
   _tmRedraw = 0;
@@ -1130,6 +1133,55 @@ void CollectWorld(CEntity *pen, std::vector<viewmodel::Beam> &aBeams, std::vecto
     gw.fR = gw.fG = gw.fB = 1.0f;
     aGlows.push_back(gw);
   }
+};
+
+// --- the pickups for the HUD's history: Sam's ammo by the Half-Life gun whose ammo picture it is
+static const ULONG _aulPickupAmmo[] = { PW_BULLETS, PW_SHELLS, PW_ROCKETS, PW_GRENADES, PW_ELECTRICITY, PW_IRONBALLS,
+#if SE1_GAME != SS_TFE
+  PW_SNIPERBULLETS,
+#endif
+};
+static const char *_astrPickupAmmo[] = { "weapon_9mmhandgun", "weapon_shotgun", "weapon_rpg", "weapon_handgrenade",
+  "weapon_gauss", "weapon_satchel", "weapon_crossbow" };
+static const INDEX CT_PICKUP_AMMO = sizeof(_aulPickupAmmo) / sizeof(_aulPickupAmmo[0]);
+static INDEX _aiLastAmmo[8];
+static INDEX _iLastHave = 0;
+static FLOAT _fLastHealth = 0, _fLastArmor = 0;
+
+void Pickups(CEntity *pen) {
+  CEntity *pw = pen != NULL ? player::PropEntity(pen, PROP_WEAPONS) : NULL;
+  if (pw == NULL || !(pen->GetFlags() & ENF_ALIVE)) {
+    _bPickupsKnown = FALSE;
+    return;
+  }
+  INDEX aiNow[8];
+  for (INDEX i = 0; i < CT_PICKUP_AMMO; i++) {
+    const INDEX *pi = (const INDEX *)player::Prop(pw, _aulPickupAmmo[i]);
+    aiNow[i] = pi != NULL ? *pi : 0;
+  }
+  const INDEX iHave = player::PropIndex(pw, PW_AVAILABLE, 0);
+  const FLOAT fHealth = ((CLiveEntity *)pen)->en_fHealth;
+  const FLOAT *pfArmor = (const FLOAT *)player::Prop(pen, player::PROP_ARMOR);
+  const FLOAT fArmor = pfArmor != NULL ? *pfArmor : 0.0f;
+  if (_bPickupsKnown && hl_bWeapons) {
+    // (a gun first, then the ammo it came with, as Half-Life's messages come)
+    for (INDEX iBit = 0; iBit < 31; iBit++) {
+      if (!(iHave & ~_iLastHave & (1 << iBit))) continue;
+      const INDEX iSam = iBit + 1;
+      const Gun g = iSam == W_IRONCANNON ? G_SATCHEL : GunFor(iSam);
+      if (g != G_NONE && _astrHudFile[g] != NULL) hud::History(hud::H_WEAPON, _astrHudFile[g], HasAmmo(pw, g) ? 1 : 0);
+    }
+    for (INDEX i = 0; i < CT_PICKUP_AMMO; i++) {
+      if (aiNow[i] > _aiLastAmmo[i]) hud::History(hud::H_AMMO, _astrPickupAmmo[i], aiNow[i] - _aiLastAmmo[i]);
+    }
+    if (fArmor > _fLastArmor + 0.5f) hud::History(hud::H_ITEM, "item_battery", 0);
+    if (fHealth > _fLastHealth + 0.5f) hud::History(hud::H_ITEM, "item_healthkit", 0);
+  }
+  for (INDEX i = 0; i < CT_PICKUP_AMMO; i++) _aiLastAmmo[i] = aiNow[i];
+  _iLastHave = iHave;
+  _fLastHealth = fHealth;
+  _fLastArmor = fArmor;
+  _bPickupsKnown = TRUE;
 };
 
 void DumpAnims(CEntity *pen) {

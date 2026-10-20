@@ -220,3 +220,6 @@ Route: rules rewritten in the host (pattern "guest's rules headless"), on the Se
   One TFE level load (StartMap of 11_AlleyOfSphinxes after the satchel check) hung once, not on the rerun.
 - 2026-10-20: the egon's beam seen (two xbeam1 beams from the view model's attachment 0 - its eye-space place from the
   last frame, units to metres - to where the view meets something, the xspark1 flare there). Screenshot TFE.
+- 2026-10-20: the HUD's pickup history (history_resource.cpp: 12 slots up from the bottom right, 5 s, fading at
+  80 a second; the gap the tallest picture yet + 5) from Sam's ammo, guns (PW_AVAILABLE bits), health and armour going
+  up each tick; ammo by the Half-Life gun whose "ammo" picture it is. Screenshot TFE after cht_bGiveAll.

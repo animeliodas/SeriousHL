@@ -24,6 +24,13 @@ CTString Status(void);
 // Drawn now (Sam's status line off).
 BOOL Active(void);
 
+// The pickups' history (history_resource.cpp), bottom right: some ammo (the gun's list whose "ammo" picture it is, how
+// much), a gun (its list: its picture), an item (hud.txt's picture: "item_battery", "item_healthkit").
+enum HistoryKind { H_AMMO = 1, H_WEAPON = 2, H_ITEM = 3 };
+void History(HistoryKind kind, const char *strName, INDEX iCount);
+// A level, the game over: none shown.
+void ClearHistory(void);
+
 }; // namespace
 
 #endif

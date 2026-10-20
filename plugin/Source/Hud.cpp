@@ -356,6 +356,85 @@ static void DrawMenu(const weapons::Menu &menu) {
   }
 };
 
+// --- the pickups (history_resource.cpp): up from the bottom right, the newest above the last, each shown 5 s
+// (hud_drawhistory_time), fading for its last 3 (the time left x 80); a gun with no ammo red
+struct HistoryItem { INDEX iKind; std::string strName; INDEX iCount; TIME tmUntil; };
+static const INDEX MAX_HISTORY = 12;
+static const FLOAT HISTORY_DRAW_TIME = 5.0f;
+static HistoryItem _aHistory[MAX_HISTORY];
+static INDEX _iHistorySlot = 0;
+static FLOAT _fHistoryGap = 0.0f; // the tallest picture shown yet (iHistoryGap), screen pixels
+static FLOAT _fHistoryMax = 620.0f; // ScreenHeight - 100, as last drawn
+static ULONG _ctHistory = 0;
+
+void History(HistoryKind kind, const char *strName, INDEX iCount) {
+  if (strName == NULL) return;
+  const FLOAT fGap = _fHistoryGap + 5.0f, fPick = 32.0f + _fHistoryGap * 2.0f;
+  if (fGap * _iHistorySlot + fPick > _fHistoryMax || _iHistorySlot >= MAX_HISTORY) _iHistorySlot = 0;
+  HistoryItem &hi = _aHistory[_iHistorySlot++];
+  hi.iKind = kind;
+  hi.strName = strName;
+  hi.iCount = iCount;
+  hi.tmUntil = _pTimer->CurrentTick() + HISTORY_DRAW_TIME;
+  _ctHistory++;
+};
+
+void ClearHistory(void) {
+  for (INDEX i = 0; i < MAX_HISTORY; i++) _aHistory[i].iKind = 0;
+  _iHistorySlot = 0;
+};
+
+static void DrawHistory(PIX pixW, PIX pixH) {
+  const TIME tmNow = _pTimer->GetLerpedCurrentTick();
+  const FLOAT k = _iRes / 640.0f * _fScale;
+  const Rect *pr0 = Find(_mapHud, "number_0");
+  const FLOAT fWidth = pr0->w * _fScale;
+  _fHistoryMax = pixH - 100.0f * k;
+  BOOL bAny = FALSE;
+  for (INDEX i = 0; i < MAX_HISTORY; i++) {
+    HistoryItem &hi = _aHistory[i];
+    if (hi.iKind == 0) continue;
+    hi.tmUntil = Min(hi.tmUntil, (TIME)(tmNow + HISTORY_DRAW_TIME));
+    if (hi.tmUntil <= tmNow) {
+      hi.iKind = 0;
+      continue;
+    }
+    bAny = TRUE;
+    INDEX r = 255, g = 160, b = 0;
+    const Rect *pr = NULL;
+    if (hi.iKind == H_AMMO) {
+      pr = Find(Gun(hi.strName.c_str()), "ammo");
+    } else if (hi.iKind == H_WEAPON) {
+      pr = Find(Gun(hi.strName.c_str()), "weapon");
+      if (hi.iCount == 0) {
+        g = 16;
+        b = 16;
+      }
+    } else {
+      pr = Find(_mapHud, hi.strName.c_str());
+    }
+    if (pr == NULL) continue;
+    if (hi.iKind != H_AMMO) _fHistoryGap = Max(_fHistoryGap, pr->h * _fScale);
+    ScaleColors(r, g, b, Min((INDEX)((hi.tmUntil - tmNow) * 80.0f), 255L));
+    const FLOAT y = pixH - (32.0f * k + _fHistoryGap * 2.0f + (_fHistoryGap + 5.0f * k) * i);
+    if (hi.iKind == H_AMMO) {
+      const FLOAT x = pixW - 24.0f * k;
+      DrawAdditive(pr, x, y, r, g, b);
+      // the count, ending 10 short of the picture
+      if (hi.iCount >= 0) {
+        const INDEX ctDigits = hi.iCount >= 100 ? 3 : hi.iCount >= 10 ? 2 : 1;
+        DrawHudNumber(x - 10.0f * k - ctDigits * fWidth, y, DHN_DRAWZERO, hi.iCount, r, g, b);
+      }
+    } else if (hi.iKind == H_WEAPON) {
+      DrawAdditive(pr, pixW - pr->w * _fScale, y, r, g, b);
+    } else {
+      DrawAdditive(pr, pixW - pr->w * _fScale - 10.0f * k, y, r, g, b);
+    }
+  }
+  // (CheckClearHistory: all gone - the next from the bottom)
+  if (!bAny) _iHistorySlot = 0;
+};
+
 // --- Sam's status line off while this is on; his crosshair (CPlayerWeapons::RenderCrosshair) skipped
 static CSymbolPtr _symShowInfo;
 static BOOL _bSamHidden = FALSE;
@@ -454,6 +533,7 @@ void Draw(CDrawPort *pdp, CEntity *pen) {
   weapons::GetMenu(pen, menu);
   DrawMenu(menu);
   DrawFlashlight(pixW);
+  DrawHistory(pixW, pixH);
 
   xglMatrixMode(GL_PROJECTION);
   xglPopMatrix();
@@ -476,9 +556,17 @@ BOOL Active(void) { return _bSamHidden; };
 CTString Status(void) {
   CTString str;
   const INDEX ctSprites = sprite::Count();
-  str.PrintF("HUD %s; resolution %d, %d sprites; Sam's status line %s; %u frames drawn",
+  INDEX ctShown = 0;
+  CTString strLast = "-";
+  for (INDEX i = 0; i < MAX_HISTORY; i++) {
+    if (_aHistory[i].iKind == 0) continue;
+    ctShown++;
+    strLast.PrintF("%s %s %d", _aHistory[i].iKind == H_AMMO ? "ammo" : _aHistory[i].iKind == H_WEAPON ? "weapon" : "item",
+      _aHistory[i].strName.c_str(), _aHistory[i].iCount);
+  }
+  str.PrintF("HUD %s; resolution %d, %d sprites; Sam's status line %s; %u frames drawn; pickups: %u, %d shown (%s)",
     !hl_bHud ? "Sam's" : _bLoaded ? "Half-Life's" : "Sam's (no Half-Life sprites)", _iRes, ctSprites,
-    _bSamHidden ? "off" : "on", _ctDrawn);
+    _bSamHidden ? "off" : "on", _ctDrawn, _ctHistory, ctShown, strLast.str_String);
   return str;
 };
 

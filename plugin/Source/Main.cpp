@@ -553,6 +553,7 @@ static void HL_OnStep(void) {
   grenades::Tick();
   tripmine::Tick(pen);
   suit::Tick(pen);
+  weapons::Pickups(pen);
 #endif
   movement::Track(pen);
 };
@@ -609,6 +610,7 @@ static void HL_OnWorldLoad(CWorld *pwo, const CTFileName &fnmWorld) {
   grenades::Release();
   tripmine::Release();
   suit::Release();
+  hud::ClearHistory();
 #endif
 };
 
@@ -621,6 +623,7 @@ static void HL_OnGameStop(void) {
   grenades::Release();
   tripmine::Release();
   suit::Release();
+  hud::ClearHistory();
 #endif
 };
 
