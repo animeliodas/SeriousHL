@@ -38,6 +38,9 @@ CTString Status(CEntity *penPlayer);
 void DumpAnims(CEntity *penPlayer);
 // Plugin shutdown: Half-Life's sounds let go.
 void FreeSounds(void);
+// For the HUD: the gun in hand's weapon_*.txt (NULL: none of Half-Life's), its magazine (-1: none), its reserve and
+// second ammo (-1: none, or endless).
+const char *HudGun(CEntity *penPlayer, INDEX &iClip, INDEX &iAmmo, INDEX &iAmmo2);
 
 }; // namespace
 

@@ -22,6 +22,10 @@ BOOL Init(void);
 void Release(void);
 CTString Status(void);
 
+// The rules' latest: horizontal speed (units a second) and whether he's on the ground (the view model's bob).
+FLOAT Speed(void);
+BOOL OnGround(void);
+
 // Tests: the next ticks into %TEMP%\SeriousHL\trace.csv (one line a tick).
 void TraceTicks(INDEX ctTicks);
 

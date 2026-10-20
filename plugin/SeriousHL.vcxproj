@@ -12,7 +12,9 @@
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="Source\StdH.h" />
+    <ClInclude Include="Source\Gl.h" />
     <ClInclude Include="Source\Hev.h" />
+    <ClInclude Include="Source\Hud.h" />
     <ClInclude Include="Source\HlMove.h" />
     <ClInclude Include="Source\Rules.h" />
     <ClInclude Include="Source\Run.h" />
@@ -24,7 +26,9 @@
       <PrecompiledHeader>Create</PrecompiledHeader>
     </ClCompile>
     <ClCompile Include="Source\Main.cpp" />
+    <ClCompile Include="Source\Gl.cpp" />
     <ClCompile Include="Source\Hev.cpp" />
+    <ClCompile Include="Source\Hud.cpp" />
     <ClCompile Include="Source\HlMove.cpp" />
     <ClCompile Include="Source\Rules.cpp" />
     <ClCompile Include="Source\Run.cpp" />

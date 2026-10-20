@@ -11,6 +11,7 @@
 #include "StdH.h"
 #include "Hev.h"
 #include "ViewModel.h"
+#include "Hud.h"
 #include "HlMove.h"
 #include "Rules.h"
 #include "Run.h"
@@ -39,6 +40,7 @@ static void HL_Status(SHELL_FUNC_ARGS) {
   CPrintF("[SeriousHL] %s\n", weapons::Status(player::Local()).str_String);
   CPrintF("[SeriousHL] %s\n", hev::Status().str_String);
   CPrintF("[SeriousHL] %s\n", viewmodel::Status().str_String);
+  CPrintF("[SeriousHL] %s\n", hud::Status().str_String);
   CEntity *pen = player::Local();
   const FLOAT *pfArmor = pen != NULL ? (FLOAT *)player::Prop(pen, player::PROP_ARMOR) : NULL;
   if (pen != NULL) CPrintF("[SeriousHL] health %.1f, armour %.1f\n", ((CLiveEntity *)pen)->en_fHealth, pfArmor != NULL ? *pfArmor : 0.0f);
@@ -469,6 +471,8 @@ static void DeclareUsual(void) {
   _pShell->DeclareSymbol("persistent user INDEX hl_bHevArmor;", &hev::hl_bHevArmor);
   _pShell->DeclareSymbol("persistent user INDEX hl_bViewModels;", &viewmodel::hl_bViewModels);
   _pShell->DeclareSymbol("persistent user FLOAT hl_fViewModelFov;", &viewmodel::hl_fViewModelFov);
+  _pShell->DeclareSymbol("persistent user INDEX hl_bHud;", &hud::hl_bHud);
+  _pShell->DeclareSymbol("persistent user FLOAT hl_fHudScale;", &hud::hl_fHudScale);
   _pShell->DeclareSymbol("user INDEX hl_iTestAlt;", &weapons::hl_iTestAlt);
 
   rules::Settings &s = hl::_settings;
@@ -527,7 +531,8 @@ static void HL_OnPostDraw(CDrawPort *pdp) {
 #ifdef SERIOUSHL_RUN
   run::Draw(pdp);
 #else
-  weapons::Draw(pdp, pen);
+  hud::Draw(pdp, pen);
+  if (!hud::Active()) weapons::Draw(pdp, pen);
 #endif
 };
 
@@ -581,6 +586,7 @@ CLASSICSPATCH_PLUGIN_STARTUP(HIniConfig props, PluginEvents_t &events) {
     weapons::Init();
     hev::Init();
     viewmodel::Init();
+    hud::Init();
   }
 #endif
   CPrintF("^cff8800[SeriousHL]^r %s loaded: Half-Life movement %s (autojump %d, bhop cap %d)\n", SERIOUSHL_VERSION,
@@ -593,5 +599,6 @@ CLASSICSPATCH_PLUGIN_SHUTDOWN(HIniConfig props) {
 #ifndef SERIOUSHL_RUN
   weapons::FreeSounds();
   viewmodel::Shutdown();
+  hud::Shutdown();
 #endif
 };

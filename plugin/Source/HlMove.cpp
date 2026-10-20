@@ -256,6 +256,9 @@ BOOL Init(void) {
   return movement::Init(&Rules);
 };
 
+FLOAT Speed(void) { return movement::Active() ? _fSpeed : 0.0f; };
+BOOL OnGround(void) { return _bGround; };
+
 void Release(void) {
   movement::Release();
   memset(&_mem, 0, sizeof(_mem));

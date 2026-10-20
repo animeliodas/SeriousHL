@@ -825,6 +825,26 @@ CTString Status(CEntity *pen) {
   return str;
 };
 
+static const char *_astrHudFile[G_COUNT] = { NULL, "weapon_crowbar", "weapon_357", "weapon_9mmhandgun", "weapon_shotgun",
+  "weapon_9mmar", "weapon_rpg", "weapon_handgrenade", "weapon_gauss", "weapon_egon", "weapon_satchel", "weapon_crossbow" };
+
+const char *HudGun(CEntity *pen, INDEX &iClip, INDEX &iAmmo, INDEX &iAmmo2) {
+  iClip = iAmmo = iAmmo2 = -1;
+  if (!_bReady || !hl_bWeapons || pen == NULL) return NULL;
+  CEntity *pw = player::PropEntity(pen, PROP_WEAPONS);
+  if (pw == NULL) return NULL;
+  const Gun g = GunFor(player::PropIndex(pw, PW_CURRENT, 0));
+  if (g == G_NONE) return NULL;
+  if (_aiClip[g] > 0) iClip = _aGuns[g].iClip;
+  const INDEX *piReserve = Reserve(pw, g);
+  iAmmo = piReserve != NULL ? *piReserve : -1;
+  if (g == G_MP5) {
+    const INDEX *piGrenades = (const INDEX *)player::Prop(pw, PW_GRENADES);
+    iAmmo2 = piGrenades != NULL ? *piGrenades : -1;
+  }
+  return _astrHudFile[g];
+};
+
 void DumpAnims(CEntity *pen) {
   CEntity *pw = pen != NULL ? player::PropEntity(pen, PROP_WEAPONS) : NULL;
   CModelObject *pmo = pw != NULL ? (CModelObject *)player::Prop(pw, PW_MODEL) : NULL;

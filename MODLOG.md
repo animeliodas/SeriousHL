@@ -163,3 +163,10 @@ Route: rules rewritten in the host (pattern "guest's rules headless"), on the Se
 - 2026-10-20: Half-Life's view models with their animations (draw, idle, fire, reload, holster; gauss spin, egon
   beam, satchel radio). Seen in TFE and TSE (`tools/view_shots.py`): .357, crowbar, Glock, MP5, shotgun, gauss, egon,
   crossbow, satchel.
+41. Half-Life's HUD (Hud.cpp) after the game's picture (OnPostDraw), with Sam's status line off (`hud_bShowInfo` 0 -
+    not persistent; given back) and his crosshair skipped (`CPlayerWeapons::RenderCrosshair` patched). Sprites: IDSP
+    version 2, the palette after the header (a short count), the first frame; SPR_ALPHTEST's colour 255 is clear (made
+    black: the HUD is drawn added). Half-Life 25th anniversary's hud.txt has 640, 1280 and 2560 sets (1280 at 1920x1080).
+42. Two games at once: the one in the background doesn't get to skip its level intro (no focus) - one game at a time
+    in tests.
+- 2026-10-20: Half-Life's HUD (health, HEV battery, ammo, second ammo, the gun's crosshair) and the view model's bob.

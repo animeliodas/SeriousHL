@@ -169,6 +169,17 @@ function Install-HalfLifeAssets([string]$Dir, [string]$Valve) {
     $m++
   }
   Write-Host "  $m view models from Half-Life -> $models"
+  # the HUD's pictures and their lists (hud.txt, weapon_*.txt; Half-Life 25th anniversary's 1280 and 2560 sets too)
+  $sprites = Join-Path $models 'sprites'
+  $s = 0
+  foreach ($f in Get-ChildItem (Join-Path $Valve 'sprites') -Recurse -File -Include '*.spr', '*.txt' -ErrorAction SilentlyContinue) {
+    $rel = $f.FullName.Substring((Join-Path $Valve 'sprites').Length).TrimStart('\')
+    $out = Join-Path $sprites $rel
+    New-Item -ItemType Directory -Force -Path (Split-Path -Parent $out) | Out-Null
+    Copy-Item -LiteralPath $f.FullName -Destination $out -Force
+    $s++
+  }
+  Write-Host "  $s HUD sprites and lists from Half-Life -> $sprites"
 }
 
 function New-Shortcut([string]$Dir, [string]$Kind) {

@@ -2,6 +2,8 @@
 #include "StdH.h"
 #include "ViewModel.h"
 #include "Player.h"
+#include "HlMove.h"
+#include "Gl.h"
 #include "SBridge.h"
 
 #include <Extras/XGizmo/Objects/StructPtr.h>
@@ -13,119 +15,6 @@
 
 namespace viewmodel {
 
-// OpenGL straight from opengl32.dll (the engine's own GL pointers aren't exported; its GL types and enums are used)
-typedef void (__stdcall *F_glBegin)(GLenum);
-static F_glBegin xglBegin = NULL;
-typedef void (__stdcall *F_glEnd)(void);
-static F_glEnd xglEnd = NULL;
-typedef void (__stdcall *F_glVertex3fv)(const GLfloat *);
-static F_glVertex3fv xglVertex3fv = NULL;
-typedef void (__stdcall *F_glTexCoord2f)(GLfloat, GLfloat);
-static F_glTexCoord2f xglTexCoord2f = NULL;
-typedef void (__stdcall *F_glColor4f)(GLfloat, GLfloat, GLfloat, GLfloat);
-static F_glColor4f xglColor4f = NULL;
-typedef void (__stdcall *F_glBindTexture)(GLenum, GLuint);
-static F_glBindTexture xglBindTexture = NULL;
-typedef void (__stdcall *F_glGenTextures)(GLsizei, GLuint *);
-static F_glGenTextures xglGenTextures = NULL;
-typedef void (__stdcall *F_glTexParameteri)(GLenum, GLenum, GLint);
-static F_glTexParameteri xglTexParameteri = NULL;
-typedef void (__stdcall *F_glTexImage2D)(GLenum, GLint, GLint, GLsizei, GLsizei, GLint, GLenum, GLenum, const void *);
-static F_glTexImage2D xglTexImage2D = NULL;
-typedef void (__stdcall *F_glMatrixMode)(GLenum);
-static F_glMatrixMode xglMatrixMode = NULL;
-typedef void (__stdcall *F_glPushMatrix)(void);
-static F_glPushMatrix xglPushMatrix = NULL;
-typedef void (__stdcall *F_glPopMatrix)(void);
-static F_glPopMatrix xglPopMatrix = NULL;
-typedef void (__stdcall *F_glLoadIdentity)(void);
-static F_glLoadIdentity xglLoadIdentity = NULL;
-typedef void (__stdcall *F_glFrustum)(double, double, double, double, double, double);
-static F_glFrustum xglFrustum = NULL;
-typedef void (__stdcall *F_glViewport)(GLint, GLint, GLsizei, GLsizei);
-static F_glViewport xglViewport = NULL;
-typedef void (__stdcall *F_glDisable)(GLenum);
-static F_glDisable xglDisable = NULL;
-typedef void (__stdcall *F_glEnable)(GLenum);
-static F_glEnable xglEnable = NULL;
-typedef void (__stdcall *F_glDepthFunc)(GLenum);
-static F_glDepthFunc xglDepthFunc = NULL;
-typedef void (__stdcall *F_glDepthRange)(double, double);
-static F_glDepthRange xglDepthRange = NULL;
-typedef void (__stdcall *F_glDepthMask)(GLboolean);
-static F_glDepthMask xglDepthMask = NULL;
-typedef void (__stdcall *F_glColorMask)(GLboolean, GLboolean, GLboolean, GLboolean);
-static F_glColorMask xglColorMask = NULL;
-typedef void (__stdcall *F_glPolygonMode)(GLenum, GLenum);
-static F_glPolygonMode xglPolygonMode = NULL;
-typedef void (__stdcall *F_glShadeModel)(GLenum);
-static F_glShadeModel xglShadeModel = NULL;
-typedef void (__stdcall *F_glTexEnvi)(GLenum, GLenum, GLint);
-static F_glTexEnvi xglTexEnvi = NULL;
-typedef void (__stdcall *F_glAlphaFunc)(GLenum, GLfloat);
-static F_glAlphaFunc xglAlphaFunc = NULL;
-typedef void (__stdcall *F_glBlendFunc)(GLenum, GLenum);
-static F_glBlendFunc xglBlendFunc = NULL;
-typedef void (__stdcall *F_glPushAttrib)(GLbitfield);
-static F_glPushAttrib xglPushAttrib = NULL;
-typedef void (__stdcall *F_glPopAttrib)(void);
-static F_glPopAttrib xglPopAttrib = NULL;
-typedef void (__stdcall *F_glPushClientAttrib)(GLbitfield);
-static F_glPushClientAttrib xglPushClientAttrib = NULL;
-typedef void (__stdcall *F_glPopClientAttrib)(void);
-static F_glPopClientAttrib xglPopClientAttrib = NULL;
-typedef void (__stdcall *F_glGetIntegerv)(GLenum, GLint *);
-static F_glGetIntegerv xglGetIntegerv = NULL;
-typedef GLboolean (__stdcall *F_glIsEnabled)(GLenum);
-static F_glIsEnabled xglIsEnabled = NULL;
-typedef HGLRC (__stdcall *F_wglGetCurrentContext)(void);
-static F_wglGetCurrentContext xwglGetCurrentContext = NULL;
-typedef PROC (__stdcall *F_wglGetProcAddress)(LPCSTR);
-static F_wglGetProcAddress xwglGetProcAddress = NULL;
-
-static BOOL LoadGL(void) {
-  static BOOL bTried = FALSE, bLoaded = FALSE;
-  if (bTried) return bLoaded;
-  bTried = TRUE;
-  HMODULE hGL = GetModuleHandleA("opengl32.dll");
-  if (hGL == NULL) return FALSE;
-  if ((xglBegin = (F_glBegin)GetProcAddress(hGL, "glBegin")) == NULL) return FALSE;
-  if ((xglEnd = (F_glEnd)GetProcAddress(hGL, "glEnd")) == NULL) return FALSE;
-  if ((xglVertex3fv = (F_glVertex3fv)GetProcAddress(hGL, "glVertex3fv")) == NULL) return FALSE;
-  if ((xglTexCoord2f = (F_glTexCoord2f)GetProcAddress(hGL, "glTexCoord2f")) == NULL) return FALSE;
-  if ((xglColor4f = (F_glColor4f)GetProcAddress(hGL, "glColor4f")) == NULL) return FALSE;
-  if ((xglBindTexture = (F_glBindTexture)GetProcAddress(hGL, "glBindTexture")) == NULL) return FALSE;
-  if ((xglGenTextures = (F_glGenTextures)GetProcAddress(hGL, "glGenTextures")) == NULL) return FALSE;
-  if ((xglTexParameteri = (F_glTexParameteri)GetProcAddress(hGL, "glTexParameteri")) == NULL) return FALSE;
-  if ((xglTexImage2D = (F_glTexImage2D)GetProcAddress(hGL, "glTexImage2D")) == NULL) return FALSE;
-  if ((xglMatrixMode = (F_glMatrixMode)GetProcAddress(hGL, "glMatrixMode")) == NULL) return FALSE;
-  if ((xglPushMatrix = (F_glPushMatrix)GetProcAddress(hGL, "glPushMatrix")) == NULL) return FALSE;
-  if ((xglPopMatrix = (F_glPopMatrix)GetProcAddress(hGL, "glPopMatrix")) == NULL) return FALSE;
-  if ((xglLoadIdentity = (F_glLoadIdentity)GetProcAddress(hGL, "glLoadIdentity")) == NULL) return FALSE;
-  if ((xglFrustum = (F_glFrustum)GetProcAddress(hGL, "glFrustum")) == NULL) return FALSE;
-  if ((xglViewport = (F_glViewport)GetProcAddress(hGL, "glViewport")) == NULL) return FALSE;
-  if ((xglDisable = (F_glDisable)GetProcAddress(hGL, "glDisable")) == NULL) return FALSE;
-  if ((xglEnable = (F_glEnable)GetProcAddress(hGL, "glEnable")) == NULL) return FALSE;
-  if ((xglDepthFunc = (F_glDepthFunc)GetProcAddress(hGL, "glDepthFunc")) == NULL) return FALSE;
-  if ((xglDepthRange = (F_glDepthRange)GetProcAddress(hGL, "glDepthRange")) == NULL) return FALSE;
-  if ((xglDepthMask = (F_glDepthMask)GetProcAddress(hGL, "glDepthMask")) == NULL) return FALSE;
-  if ((xglColorMask = (F_glColorMask)GetProcAddress(hGL, "glColorMask")) == NULL) return FALSE;
-  if ((xglPolygonMode = (F_glPolygonMode)GetProcAddress(hGL, "glPolygonMode")) == NULL) return FALSE;
-  if ((xglShadeModel = (F_glShadeModel)GetProcAddress(hGL, "glShadeModel")) == NULL) return FALSE;
-  if ((xglTexEnvi = (F_glTexEnvi)GetProcAddress(hGL, "glTexEnvi")) == NULL) return FALSE;
-  if ((xglAlphaFunc = (F_glAlphaFunc)GetProcAddress(hGL, "glAlphaFunc")) == NULL) return FALSE;
-  if ((xglBlendFunc = (F_glBlendFunc)GetProcAddress(hGL, "glBlendFunc")) == NULL) return FALSE;
-  if ((xglPushAttrib = (F_glPushAttrib)GetProcAddress(hGL, "glPushAttrib")) == NULL) return FALSE;
-  if ((xglPopAttrib = (F_glPopAttrib)GetProcAddress(hGL, "glPopAttrib")) == NULL) return FALSE;
-  if ((xglPushClientAttrib = (F_glPushClientAttrib)GetProcAddress(hGL, "glPushClientAttrib")) == NULL) return FALSE;
-  if ((xglPopClientAttrib = (F_glPopClientAttrib)GetProcAddress(hGL, "glPopClientAttrib")) == NULL) return FALSE;
-  if ((xglGetIntegerv = (F_glGetIntegerv)GetProcAddress(hGL, "glGetIntegerv")) == NULL) return FALSE;
-  if ((xglIsEnabled = (F_glIsEnabled)GetProcAddress(hGL, "glIsEnabled")) == NULL) return FALSE;
-  if ((xwglGetCurrentContext = (F_wglGetCurrentContext)GetProcAddress(hGL, "wglGetCurrentContext")) == NULL) return FALSE;
-  if ((xwglGetProcAddress = (F_wglGetProcAddress)GetProcAddress(hGL, "wglGetProcAddress")) == NULL) return FALSE;
-  bLoaded = TRUE;
-  return TRUE;
-};
 
 INDEX hl_bViewModels = TRUE;
 FLOAT hl_fViewModelFov = 90.0f;
@@ -363,7 +252,7 @@ static INDEX PowerOfTwo(INDEX i) {
 };
 
 static void MakeTextures(Model &m) {
-  const HGLRC hNow = xwglGetCurrentContext();
+  const HGLRC hNow = gl::xwglGetCurrentContext();
   if (m.hContext == hNow && !m.aulTextures.empty()) return;
   // (a new context - the old textures went with the old one)
   m.hContext = hNow;
@@ -386,13 +275,13 @@ static void MakeTextures(Model &m) {
       }
     }
     GLuint id = 0;
-    xglGenTextures(1, &id);
-    xglBindTexture(GL_TEXTURE_2D, id);
-    xglTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
-    xglTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-    xglTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
-    xglTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
-    xglTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, w2, h2, 0, GL_RGBA, GL_UNSIGNED_BYTE, &aul[0]);
+    gl::xglGenTextures(1, &id);
+    gl::xglBindTexture(GL_TEXTURE_2D, id);
+    gl::xglTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+    gl::xglTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+    gl::xglTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
+    gl::xglTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
+    gl::xglTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, w2, h2, 0, GL_RGBA, GL_UNSIGNED_BYTE, &aul[0]);
     m.aulTextures[t] = id;
   }
 };
@@ -453,6 +342,38 @@ static float Frame(const Model &m, TIME tmNow) {
   return f;
 };
 
+// --- the bob (view.cpp V_CalcBob: cl_bob 0.01, cl_bobcycle 0.8, cl_bobup 0.5): up and down with the running speed, the
+// gun pushed ahead and tilted with it (V_CalcNormalRefdef); held while in the air
+static double _tmBob = 0.0;
+static float _fBob = 0.0f;
+static CTimerValue _tvLast;
+static BOOL _bLast = FALSE;
+
+static float Bob(void) {
+  const CTimerValue tvNow = _pTimer->GetHighPrecisionTimer();
+  const double tmFrame = _bLast ? Clamp((tvNow - _tvLast).GetSeconds(), 0.0, 0.1) : 0.0;
+  _tvLast = tvNow;
+  _bLast = TRUE;
+  if (!hl::OnGround() || tmFrame <= 0.0) return _fBob;
+  _tmBob += tmFrame;
+  float fCycle = (float)(_tmBob - (int)(_tmBob / 0.8) * 0.8) / 0.8f;
+  fCycle = fCycle < 0.5f ? 3.14159265f * fCycle / 0.5f : 3.14159265f + 3.14159265f * (fCycle - 0.5f) / 0.5f;
+  const float fBob = hl::Speed() * 0.01f;
+  _fBob = Clamp(fBob * 0.3f + fBob * 0.7f * sinf(fCycle), -7.0f, 4.0f);
+  return _fBob;
+};
+
+// mathlib.c AngleMatrix: (yaw x pitch) x roll, degrees
+static void AngleMatrix(float fPitch, float fYaw, float fRoll, Mat34 m) {
+  const float d = 3.14159265f / 180.0f;
+  const float sy = sinf(fYaw * d), cy = cosf(fYaw * d), sp = sinf(fPitch * d), cp = cosf(fPitch * d);
+  const float sr = sinf(fRoll * d), cr = cosf(fRoll * d);
+  m[0][0] = cp * cy; m[1][0] = cp * sy; m[2][0] = -sp;
+  m[0][1] = sr * sp * cy - cr * sy; m[1][1] = sr * sp * sy + cr * cy; m[2][1] = sr * cp;
+  m[0][2] = cr * sp * cy + sr * sy; m[1][2] = cr * sp * sy - sr * cy; m[2][2] = cr * cp;
+  m[0][3] = m[1][3] = m[2][3] = 0.0f;
+};
+
 // --- drawing: Half-Life model space (x ahead, y left, z up) into the eye's (x right, y up, z back)
 static inline void ToEye(const float *v, float *e) {
   e[0] = -v[1];
@@ -464,6 +385,18 @@ static void Draw(Model &m, CDrawPort *pdp, const FLOAT3D &vLightEye, FLOAT fAmbi
   const StudioHeader *ph = m.Header();
   static Mat34 amBones[MAX_BONES];
   BoneTransforms(m, _iSeq, Frame(m, _pTimer->GetLerpedCurrentTick()), amBones);
+  // the bob: the whole gun turned (yaw -bob/2, roll -bob, pitch -bob*0.3) and moved (ahead bob*0.4, up bob)
+  const float fBob = Bob();
+  if (fBob != 0.0f) {
+    Mat34 mBob, mOut;
+    AngleMatrix(-fBob * 0.3f, -fBob * 0.5f, -fBob, mBob);
+    mBob[0][3] = fBob * 0.4f;
+    mBob[2][3] = fBob;
+    for (int b = 0; b < ph->numbones; b++) {
+      ConcatTransforms(mBob, amBones[b], mOut);
+      memcpy(amBones[b], mOut, sizeof(Mat34));
+    }
+  }
   MakeTextures(m);
 
   // the projection: Half-Life's field of view (horizontal at 4:3, kept vertical for wider screens), units as they are
@@ -471,33 +404,33 @@ static void Draw(Model &m, CDrawPort *pdp, const FLOAT3D &vLightEye, FLOAT fAmbi
   const float fNear = 1.0f, fFar = 1024.0f;
   const float fAspect = (float)pdp->dp_Width / Max((float)pdp->dp_Height, 1.0f);
   const float fTop = fNear * tanf(fFovY * 0.5f);
-  xglMatrixMode(GL_PROJECTION);
-  xglPushMatrix();
-  xglLoadIdentity();
-  xglFrustum(-fTop * fAspect, fTop * fAspect, -fTop, fTop, fNear, fFar);
-  xglMatrixMode(GL_TEXTURE);
-  xglPushMatrix();
-  xglLoadIdentity();
-  xglMatrixMode(GL_MODELVIEW);
-  xglPushMatrix();
-  xglLoadIdentity();
-  xglViewport(pdp->dp_MinI, pdp->dp_Raster->ra_Height - (pdp->dp_MinJ + pdp->dp_Height), pdp->dp_Width, pdp->dp_Height);
-  xglDisable(GL_FOG);
-  xglDisable(GL_LIGHTING);
-  xglDisable(GL_CULL_FACE);
-  xglDisable(GL_STENCIL_TEST);
-  xglDisable(GL_SCISSOR_TEST);
-  xglDisable(GL_CLIP_PLANE0);
-  xglDisable(GL_TEXTURE_GEN_S);
-  xglDisable(GL_TEXTURE_GEN_T);
-  xglEnable(GL_DEPTH_TEST);
-  xglDepthFunc(GL_LEQUAL);
-  xglDepthRange(0.0, 0.1);
-  xglColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
-  xglPolygonMode(GL_FRONT_AND_BACK, GL_FILL);
-  xglShadeModel(GL_SMOOTH);
-  xglEnable(GL_TEXTURE_2D);
-  xglTexEnvi(GL_TEXTURE_ENV, GL_TEXTURE_ENV_MODE, GL_MODULATE);
+  gl::xglMatrixMode(GL_PROJECTION);
+  gl::xglPushMatrix();
+  gl::xglLoadIdentity();
+  gl::xglFrustum(-fTop * fAspect, fTop * fAspect, -fTop, fTop, fNear, fFar);
+  gl::xglMatrixMode(GL_TEXTURE);
+  gl::xglPushMatrix();
+  gl::xglLoadIdentity();
+  gl::xglMatrixMode(GL_MODELVIEW);
+  gl::xglPushMatrix();
+  gl::xglLoadIdentity();
+  gl::xglViewport(pdp->dp_MinI, pdp->dp_Raster->ra_Height - (pdp->dp_MinJ + pdp->dp_Height), pdp->dp_Width, pdp->dp_Height);
+  gl::xglDisable(GL_FOG);
+  gl::xglDisable(GL_LIGHTING);
+  gl::xglDisable(GL_CULL_FACE);
+  gl::xglDisable(GL_STENCIL_TEST);
+  gl::xglDisable(GL_SCISSOR_TEST);
+  gl::xglDisable(GL_CLIP_PLANE0);
+  gl::xglDisable(GL_TEXTURE_GEN_S);
+  gl::xglDisable(GL_TEXTURE_GEN_T);
+  gl::xglEnable(GL_DEPTH_TEST);
+  gl::xglDepthFunc(GL_LEQUAL);
+  gl::xglDepthRange(0.0, 0.1);
+  gl::xglColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
+  gl::xglPolygonMode(GL_FRONT_AND_BACK, GL_FILL);
+  gl::xglShadeModel(GL_SMOOTH);
+  gl::xglEnable(GL_TEXTURE_2D);
+  gl::xglTexEnvi(GL_TEXTURE_ENV, GL_TEXTURE_ENV_MODE, GL_MODULATE);
 
   const short *pskins = m.At<short>(ph->skinindex);
   const StudioTexture *ptex = m.At<StudioTexture>(ph->textureindex);
@@ -507,15 +440,15 @@ static void Draw(Model &m, CDrawPort *pdp, const FLOAT3D &vLightEye, FLOAT fAmbi
   // two passes: solid (and masked) first, additive over them
   for (INDEX iPass = 0; iPass < 2; iPass++) {
     if (iPass == 0) {
-      xglDisable(GL_BLEND);
-      xglEnable(GL_ALPHA_TEST);
-      xglAlphaFunc(GL_GREATER, 0.5f);
-      xglDepthMask(GL_TRUE);
+      gl::xglDisable(GL_BLEND);
+      gl::xglEnable(GL_ALPHA_TEST);
+      gl::xglAlphaFunc(GL_GREATER, 0.5f);
+      gl::xglDepthMask(GL_TRUE);
     } else {
-      xglDisable(GL_ALPHA_TEST);
-      xglEnable(GL_BLEND);
-      xglBlendFunc(GL_ONE, GL_ONE);
-      xglDepthMask(GL_FALSE);
+      gl::xglDisable(GL_ALPHA_TEST);
+      gl::xglEnable(GL_BLEND);
+      gl::xglBlendFunc(GL_ONE, GL_ONE);
+      gl::xglDepthMask(GL_FALSE);
     }
     for (int bp = 0; bp < ph->numbodyparts; bp++) {
       const StudioBodyPart &part = pparts[bp];
@@ -553,40 +486,40 @@ static void Draw(Model &m, CDrawPort *pdp, const FLOAT3D &vLightEye, FLOAT fAmbi
         const StudioTexture &tex = ptex[iTex];
         const BOOL bAdditive = (tex.flags & NF_ADDITIVE) != 0;
         if ((iPass == 1) != bAdditive) continue;
-        xglBindTexture(GL_TEXTURE_2D, m.aulTextures[iTex]);
+        gl::xglBindTexture(GL_TEXTURE_2D, m.aulTextures[iTex]);
         const float fS = 1.0f / Max(tex.width, 1), fT = 1.0f / Max(tex.height, 1);
         const BOOL bChrome = (tex.flags & NF_CHROME) != 0, bBright = (tex.flags & NF_FULLBRIGHT) != 0 || bAdditive;
         const short *pcmd = m.At<short>(mesh.triindex);
         for (int ct = *(pcmd++); ct != 0; ct = *(pcmd++)) {
           if (ct < 0) {
-            xglBegin(GL_TRIANGLE_FAN);
+            gl::xglBegin(GL_TRIANGLE_FAN);
             ct = -ct;
           } else {
-            xglBegin(GL_TRIANGLE_STRIP);
+            gl::xglBegin(GL_TRIANGLE_STRIP);
           }
           ctTris += ct - 2;
           for (; ct > 0; ct--, pcmd += 4) {
             const int iv = pcmd[0] < sm.numverts ? pcmd[0] : 0, in = pcmd[1] < sm.numnorms ? pcmd[1] : 0;
             if (bChrome) {
-              xglTexCoord2f(0.5f + 0.5f * afNormEye[in][0], 0.5f - 0.5f * afNormEye[in][1]);
+              gl::xglTexCoord2f(0.5f + 0.5f * afNormEye[in][0], 0.5f - 0.5f * afNormEye[in][1]);
             } else {
-              xglTexCoord2f(pcmd[2] * fS, pcmd[3] * fT);
+              gl::xglTexCoord2f(pcmd[2] * fS, pcmd[3] * fT);
             }
             const float l = bBright ? 1.0f : afLight[in];
-            xglColor4f(l, l, l, 1.0f);
-            xglVertex3fv(afVerts[iv]);
+            gl::xglColor4f(l, l, l, 1.0f);
+            gl::xglVertex3fv(afVerts[iv]);
           }
-          xglEnd();
+          gl::xglEnd();
         }
       }
     }
   }
-  xglMatrixMode(GL_PROJECTION);
-  xglPopMatrix();
-  xglMatrixMode(GL_TEXTURE);
-  xglPopMatrix();
-  xglMatrixMode(GL_MODELVIEW);
-  xglPopMatrix();
+  gl::xglMatrixMode(GL_PROJECTION);
+  gl::xglPopMatrix();
+  gl::xglMatrixMode(GL_TEXTURE);
+  gl::xglPopMatrix();
+  gl::xglMatrixMode(GL_MODELVIEW);
+  gl::xglPopMatrix();
   _ctTris = ctTris;
 };
 
@@ -609,30 +542,30 @@ static void Render(CEntity *penPlayer, CPerspectiveProjection3D &pr, CDrawPort *
   const FLOAT fAmbient = Clamp((Max(Max(ubAR, ubAG), ubAB) + 32) / 255.0f, 0.25f, 1.0f);
   const FLOAT fDiffuse = Clamp((Max(Max(ubLR, ubLG), ubLB) + 32) / 255.0f, 0.0f, 1.0f);
 
-  if (_pglActiveTexture == NULL) _pglActiveTexture = (FActiveTexture)xwglGetProcAddress("glActiveTextureARB");
+  if (_pglActiveTexture == NULL) _pglActiveTexture = (FActiveTexture)gl::xwglGetProcAddress("glActiveTextureARB");
   GLint iActive = GL_TEXTURE0_, ctUnits = 1;
   BOOL abWasOn[4] = { FALSE, FALSE, FALSE, FALSE };
   if (_pglActiveTexture != NULL) {
-    xglGetIntegerv((GLenum)GL_ACTIVE_TEXTURE_, &iActive);
-    xglGetIntegerv((GLenum)GL_MAX_TEXTURE_UNITS_, &ctUnits);
+    gl::xglGetIntegerv((GLenum)GL_ACTIVE_TEXTURE_, &iActive);
+    gl::xglGetIntegerv((GLenum)GL_MAX_TEXTURE_UNITS_, &ctUnits);
     ctUnits = Min((INDEX)ctUnits, (INDEX)4);
     for (GLint u = 1; u < ctUnits; u++) {
       _pglActiveTexture((GLenum)(GL_TEXTURE0_ + u));
-      abWasOn[u] = xglIsEnabled(GL_TEXTURE_2D);
-      xglDisable(GL_TEXTURE_2D);
+      abWasOn[u] = gl::xglIsEnabled(GL_TEXTURE_2D);
+      gl::xglDisable(GL_TEXTURE_2D);
     }
     _pglActiveTexture((GLenum)GL_TEXTURE0_);
   }
-  xglPushAttrib(GL_ALL_ATTRIB_BITS);
-  xglPushClientAttrib(GL_CLIENT_ALL_ATTRIB_BITS);
+  gl::xglPushAttrib(GL_ALL_ATTRIB_BITS);
+  gl::xglPushClientAttrib(GL_CLIENT_ALL_ATTRIB_BITS);
   Draw(*_pmModel, pdp, vLightEye, fAmbient, fDiffuse);
-  xglPopClientAttrib();
-  xglPopAttrib();
+  gl::xglPopClientAttrib();
+  gl::xglPopAttrib();
   if (_pglActiveTexture != NULL) {
     for (GLint u = 1; u < ctUnits; u++) {
       if (!abWasOn[u]) continue;
       _pglActiveTexture((GLenum)(GL_TEXTURE0_ + u));
-      xglEnable(GL_TEXTURE_2D);
+      gl::xglEnable(GL_TEXTURE_2D);
     }
     _pglActiveTexture((GLenum)iActive);
   }
@@ -653,7 +586,7 @@ public:
     CEntity *penPlayer = player::Local();
     CEntity *penOurs = penPlayer != NULL ? player::PropEntity(penPlayer, PROP_WEAPONS) : NULL;
     const BOOL bOurs = penOurs != NULL && (this == penOurs || (IsPredictor() && GetPredicted() == penOurs));
-    if (!bRender || !bOurs || !Ready() || _pGfx->GetCurrentAPI() != GAT_OGL || !LoadGL() || !(penPlayer->GetFlags() & ENF_ALIVE)) {
+    if (!bRender || !bOurs || !Ready() || _pGfx->GetCurrentAPI() != GAT_OGL || !gl::Load() || !(penPlayer->GetFlags() & ENF_ALIVE)) {
       _bDrawn = FALSE;
       (this->*_pRenderWeaponModel)(pr, pdp, vLightDir, colLight, colAmbient, bRender, iEye);
       return;
