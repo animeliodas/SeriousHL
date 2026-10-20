@@ -53,14 +53,26 @@ struct Placed {
   FLOAT fUnit, fLight;
 };
 // A beam: a sprite (Models\SeriousHL\sprites, "laserbeam") from one end to the other, this wide (metres), its colour
-// (0..1, added).
+// (0..1, added); bFromEye: vFrom is in the eye's space (metres: x right, y up, z back - a view model's attachment).
 struct Beam {
   FLOAT3D vFrom, vTo;
   FLOAT fWidth;
   FLOAT fR, fG, fB;
   const char *strSprite;
+  BOOL bFromEye;
 };
-void DrawWorld(CAnyProjection3D &apr, CDrawPort *pdp, const Placed *aPlaced, INDEX ctPlaced, const Beam *aBeams, INDEX ctBeams);
+// A glow: a sprite's frame facing the eye at a place, metres a pixel of it, its colour (added).
+struct Glow {
+  FLOAT3D vPos;
+  FLOAT fSize;
+  const char *strSprite;
+  INDEX iFrame;
+  FLOAT fR, fG, fB;
+};
+void DrawWorld(CAnyProjection3D &apr, CDrawPort *pdp, const Placed *aPlaced, INDEX ctPlaced, const Beam *aBeams, INDEX ctBeams,
+  const Glow *aGlows, INDEX ctGlows);
+// Where the gun in hand's attachment was last drawn: the eye's space, Half-Life's units. FALSE: none such.
+BOOL Attachment(INDEX iAttachment, FLOAT3D &vEye);
 
 }; // namespace
 

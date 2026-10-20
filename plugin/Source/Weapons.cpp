@@ -1089,6 +1089,49 @@ const char *HudGun(CEntity *pen, INDEX &iClip, INDEX &iAmmo, INDEX &iAmmo2) {
   return _astrHudFile[g];
 };
 
+// the egon's (ev_hldm.cpp EV_EgonFire, the wide beam single player fires: 50 50 125 at brightness 0.7; 3.5 and 5 units
+// wide, the second its noise) from the gun's attachment to where the view meets something (2048 units), the flare there
+// (EGON_FLARE_SPRITE: sprites/XSpark1, scale 1)
+void CollectWorld(CEntity *pen, std::vector<viewmodel::Beam> &aBeams, std::vector<viewmodel::Glow> &aGlows) {
+  CWorld *pwo = IWorld::GetWorld();
+  if (!_bReady || !hl_bWeapons || pen == NULL || pwo == NULL || !_bEgonOn || _gView != G_EGON) return;
+  const CPlacement3D plView = IWorld::GetViewpoint((CPlayerEntity *)pen, TRUE);
+  FLOAT3D vDir;
+  AnglesToDirectionVector(plView.pl_OrientationAngle, vDir);
+  const FLOAT fReach = 2048.0f * Unit();
+  CCastRay cr(pen, plView.pl_PositionVector, plView.pl_PositionVector + vDir * fReach);
+  cr.cr_ttHitModels = CCastRay::TT_COLLISIONBOX;
+  pwo->CastRay(cr);
+  const FLOAT3D vEnd = cr.cr_penHit != NULL ? cr.cr_vHit : plView.pl_PositionVector + vDir * fReach;
+  FLOAT3D vFrom;
+  if (viewmodel::Attachment(0, vFrom)) {
+    vFrom *= Unit();
+  } else {
+    vFrom = FLOAT3D(0.1f, -0.2f, -0.5f);
+  }
+  viewmodel::Beam be;
+  be.vFrom = vFrom;
+  be.vTo = vEnd;
+  be.bFromEye = TRUE;
+  be.strSprite = "xbeam1";
+  be.fR = 50.0f / 255.0f * 0.7f;
+  be.fG = 50.0f / 255.0f * 0.7f;
+  be.fB = 125.0f / 255.0f * 0.7f;
+  be.fWidth = 3.5f * Unit();
+  aBeams.push_back(be);
+  be.fWidth = 5.0f * Unit();
+  aBeams.push_back(be);
+  if (cr.cr_penHit != NULL) {
+    viewmodel::Glow gw;
+    gw.vPos = vEnd - vDir * (4.0f * Unit());
+    gw.fSize = Unit();
+    gw.strSprite = "xspark1";
+    gw.iFrame = (INDEX)(_pTimer->GetLerpedCurrentTick() * 10.0f);
+    gw.fR = gw.fG = gw.fB = 1.0f;
+    aGlows.push_back(gw);
+  }
+};
+
 void DumpAnims(CEntity *pen) {
   CEntity *pw = pen != NULL ? player::PropEntity(pen, PROP_WEAPONS) : NULL;
   CModelObject *pmo = pw != NULL ? (CModelObject *)player::Prop(pw, PW_MODEL) : NULL;

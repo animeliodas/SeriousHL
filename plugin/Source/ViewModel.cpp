@@ -440,6 +440,15 @@ static inline void ToEye(const float *v, float *e) {
   e[2] = -v[0];
 };
 
+static FLOAT3D _avAttachments[4];
+static INDEX _ctAttachments = 0;
+
+BOOL Attachment(INDEX iAttachment, FLOAT3D &vEye) {
+  if (!_bDrawn || iAttachment < 0 || iAttachment >= _ctAttachments) return FALSE;
+  vEye = _avAttachments[iAttachment];
+  return TRUE;
+};
+
 // (as ToEye: the view model's space is the eye's, turned)
 static const Mat34 _mModelToEye = { { 0, -1, 0, 0 }, { 0, 0, 1, 0 }, { -1, 0, 0, 0 } };
 
@@ -587,6 +596,16 @@ static void Draw(Model &m, CDrawPort *pdp, const FLOAT3D &vLightEye, FLOAT fAmbi
   gl::xglTexEnvi(GL_TEXTURE_ENV, GL_TEXTURE_ENV_MODE, GL_MODULATE);
 
   const ULONG ctTris = Meshes(m, amBones, _iBody, _mModelToEye, vLightEye, fAmbient, fDiffuse);
+  // (the attachments where they are now: the egon's beam starts at one)
+  _ctAttachments = Min((INDEX)ph->numattachments, (INDEX)4);
+  for (INDEX a = 0; a < _ctAttachments; a++) {
+    const StudioAttachment &att = m.At<StudioAttachment>(ph->attachmentindex)[a];
+    const Mat34 &mb = amBones[att.bone >= 0 && att.bone < ph->numbones ? att.bone : 0];
+    float w[3], e[3];
+    for (int i = 0; i < 3; i++) w[i] = att.org[0] * mb[i][0] + att.org[1] * mb[i][1] + att.org[2] * mb[i][2] + mb[i][3];
+    ToEye(w, e);
+    _avAttachments[a] = FLOAT3D(e[0], e[1], e[2]);
+  }
   // the muzzle flashes: sprites facing the eye at their attachments, added
   const CTimerValue tvNow = _pTimer->GetHighPrecisionTimer();
   INDEX ctKept = 0;
@@ -707,8 +726,9 @@ static CTString _strWorldDebug, _strPlacedDebug, _strDepthDebug;
 INDEX hl_bWorldDebug = FALSE;
 INDEX hl_bWorldModels = TRUE;
 
-void DrawWorld(CAnyProjection3D &apr, CDrawPort *pdp, const Placed *aPlaced, INDEX ctPlaced, const Beam *aBeams, INDEX ctBeams) {
-  if (ctPlaced + ctBeams <= 0 || !hl_bWorldModels || pdp == NULL || !apr.IsPerspective()) return;
+void DrawWorld(CAnyProjection3D &apr, CDrawPort *pdp, const Placed *aPlaced, INDEX ctPlaced, const Beam *aBeams, INDEX ctBeams,
+    const Glow *aGlows, INDEX ctGlows) {
+  if (ctPlaced + ctBeams + ctGlows <= 0 || !hl_bWorldModels || pdp == NULL || !apr.IsPerspective()) return;
   if (_pGfx->GetCurrentAPI() != GAT_OGL || !gl::Load()) return;
   CPerspectiveProjection3D &ppr = *(CPerspectiveProjection3D *)(CProjection3D *)apr;
   if (ppr.pr_bMirror || ppr.pr_bWarp) return;
@@ -843,7 +863,7 @@ void DrawWorld(CAnyProjection3D &apr, CDrawPort *pdp, const Placed *aPlaced, IND
     const Beam &be = aBeams[b];
     sprite::Sprite *ps = sprite::Load(be.strSprite);
     if (ps == NULL || ps->bBroken || ps->aFrames.empty() || !sprite::Bind(ps, 0)) continue;
-    const FLOAT3D v0 = (be.vFrom - vViewer) * mToEye, v1 = (be.vTo - vViewer) * mToEye;
+    const FLOAT3D v0 = be.bFromEye ? be.vFrom : (be.vFrom - vViewer) * mToEye, v1 = (be.vTo - vViewer) * mToEye;
     FLOAT3D vAlong = v1 - v0;
     const FLOAT fLength = vAlong.Length();
     if (fLength < 0.001f) continue;
@@ -869,6 +889,26 @@ void DrawWorld(CAnyProjection3D &apr, CDrawPort *pdp, const Placed *aPlaced, IND
     gl::xglVertex3f(v1(1) - vAcross(1), v1(2) - vAcross(2), v1(3) - vAcross(3));
     gl::xglEnd();
     _ctBeamsDrawn++;
+  }
+  // glows: a sprite's frame facing the eye (its origin as the sprite has it), added
+  for (INDEX g = 0; g < ctGlows; g++) {
+    const Glow &gw = aGlows[g];
+    sprite::Sprite *ps = sprite::Load(gw.strSprite);
+    if (ps == NULL || ps->bBroken || ps->aFrames.empty()) continue;
+    const INDEX iFrame = gw.iFrame % (INDEX)ps->aFrames.size();
+    if (!sprite::Bind(ps, iFrame)) continue;
+    const sprite::Frame &fr = ps->aFrames[iFrame];
+    const FLOAT3D e = (gw.vPos - vViewer) * mToEye;
+    const float x0 = e(1) + fr.iOriginX * gw.fSize, y0 = e(2) + fr.iOriginY * gw.fSize;
+    const float x1 = x0 + fr.iW * gw.fSize, y1 = y0 - fr.iH * gw.fSize;
+    const float u1 = (float)fr.iW / fr.iW2, v1 = (float)fr.iH / fr.iH2;
+    gl::xglColor4f(gw.fR, gw.fG, gw.fB, 1.0f);
+    gl::xglBegin(GL_QUADS);
+    gl::xglTexCoord2f(0.0f, 0.0f); gl::xglVertex3f(x0, y0, e(3));
+    gl::xglTexCoord2f(u1, 0.0f); gl::xglVertex3f(x1, y0, e(3));
+    gl::xglTexCoord2f(u1, v1); gl::xglVertex3f(x1, y1, e(3));
+    gl::xglTexCoord2f(0.0f, v1); gl::xglVertex3f(x0, y1, e(3));
+    gl::xglEnd();
   }
 
   gl::xglMatrixMode(GL_PROJECTION);

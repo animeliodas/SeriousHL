@@ -13,6 +13,8 @@
 #define SERIOUSHL_TRIPMINE_H
 
 #include "StdH.h"
+#include "ViewModel.h"
+#include <vector>
 
 namespace tripmine {
 
@@ -22,8 +24,8 @@ BOOL Aim(CEntity *penPlayer, FLOAT3D &vHit, FLOAT3D &vNormal, CEntity *&penWall)
 void Add(CEntity *penGrenade, CEntity *penPlayer, const FLOAT3D &vNormal, CEntity *penWall);
 // Every tick: powering up, the beams, the walls.
 void Tick(CEntity *penPlayer);
-// After Sam's world is drawn (the OnRenderView event): the mines and their beams.
-void Render(CAnyProjection3D &apr, CDrawPort *pdp);
+// What to draw in the world (ViewModel.h DrawWorld): the mines and their beams.
+void Collect(std::vector<viewmodel::Placed> &aPlaced, std::vector<viewmodel::Beam> &aBeams);
 INDEX Count(void);
 // A level, the game over: none kept.
 void Release(void);

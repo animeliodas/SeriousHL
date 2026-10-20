@@ -20,6 +20,8 @@
 #define SERIOUSHL_WEAPONS_H
 
 #include "StdH.h"
+#include "ViewModel.h"
+#include <vector>
 
 namespace weapons {
 
@@ -47,6 +49,8 @@ const char *HudGun(CEntity *penPlayer, INDEX &iClip, INDEX &iAmmo, INDEX &iAmmo2
 struct MenuGun { const char *strFile; INDEX iSlot, iPos; BOOL bAmmo, bSelected; };
 struct Menu { BOOL bOpen; INDEX iSlot; INDEX ctGuns; MenuGun aGuns[16]; };
 void GetMenu(CEntity *penPlayer, Menu &menu);
+// What of the guns is seen in the world this frame (ViewModel.h DrawWorld): the egon's beams and their flare.
+void CollectWorld(CEntity *penPlayer, std::vector<viewmodel::Beam> &aBeams, std::vector<viewmodel::Glow> &aGlows);
 
 }; // namespace
 

@@ -578,7 +578,17 @@ static void HL_OnPostDraw(CDrawPort *pdp) {
 // after the world is drawn (the game's view): Half-Life's things in it
 static void HL_OnRenderView(CWorld &wo, CEntity *penViewer, CAnyProjection3D &apr, CDrawPort *pdp) {
 #ifndef SERIOUSHL_RUN
-  if (GetGameAPI()->IsGameOn() && &wo == IWorld::GetWorld()) tripmine::Render(apr, pdp);
+  if (!GetGameAPI()->IsGameOn() || &wo != IWorld::GetWorld()) return;
+  static std::vector<viewmodel::Placed> aPlaced;
+  static std::vector<viewmodel::Beam> aBeams;
+  static std::vector<viewmodel::Glow> aGlows;
+  aPlaced.clear();
+  aBeams.clear();
+  aGlows.clear();
+  tripmine::Collect(aPlaced, aBeams);
+  weapons::CollectWorld(player::Local(), aBeams, aGlows);
+  viewmodel::DrawWorld(apr, pdp, aPlaced.empty() ? NULL : &aPlaced[0], (INDEX)aPlaced.size(), aBeams.empty() ? NULL : &aBeams[0],
+    (INDEX)aBeams.size(), aGlows.empty() ? NULL : &aGlows[0], (INDEX)aGlows.size());
 #endif
 };
 

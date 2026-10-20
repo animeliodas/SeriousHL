@@ -240,12 +240,7 @@ void Tick(CEntity *penPlayer) {
   }
 };
 
-void Render(CAnyProjection3D &apr, CDrawPort *pdp) {
-  if (_aMines.empty()) return;
-  static std::vector<viewmodel::Placed> aPlaced;
-  static std::vector<viewmodel::Beam> aBeams;
-  aPlaced.clear();
-  aBeams.clear();
+void Collect(std::vector<viewmodel::Placed> &aPlaced, std::vector<viewmodel::Beam> &aBeams) {
   const FLOAT fNow = _pTimer->GetLerpedCurrentTick();
   for (size_t i = 0; i < _aMines.size(); i++) {
     const Mine &m = _aMines[i];
@@ -271,9 +266,9 @@ void Render(CAnyProjection3D &apr, CDrawPort *pdp) {
     be.fG = (214.0f / 255.0f) * (64.0f / 255.0f);
     be.fB = (198.0f / 255.0f) * (64.0f / 255.0f);
     be.strSprite = "laserbeam";
+    be.bFromEye = FALSE;
     aBeams.push_back(be);
   }
-  viewmodel::DrawWorld(apr, pdp, &aPlaced[0], (INDEX)aPlaced.size(), aBeams.empty() ? NULL : &aBeams[0], (INDEX)aBeams.size());
 };
 
 INDEX Count(void) { return (INDEX)_aMines.size(); };

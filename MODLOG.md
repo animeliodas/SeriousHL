@@ -218,3 +218,5 @@ Route: rules rewritten in the host (pattern "guest's rules headless"), on the Se
 - 2026-10-20: the HEV suit's voice; Half-Life's tripmines (on the cannon with the satchels, the cannon key swaps them)
   drawn in Sam's world with their lasers. test_weapons suit, tripmine PASS TFE and TSE; satchel, slots, grenade PASS TFE.
   One TFE level load (StartMap of 11_AlleyOfSphinxes after the satchel check) hung once, not on the rerun.
+- 2026-10-20: the egon's beam seen (two xbeam1 beams from the view model's attachment 0 - its eye-space place from the
+  last frame, units to metres - to where the view meets something, the xspark1 flare there). Screenshot TFE.
