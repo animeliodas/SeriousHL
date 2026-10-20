@@ -186,3 +186,8 @@ Route: rules rewritten in the host (pattern "guest's rules headless"), on the Se
     hud_fastswitch takes a gun at once only when it's the only one in its slot (SelectSlot); its menu doesn't time out.
 - 2026-10-20: Half-Life's weapon menu (slots 1-5, the wheel, the flip key as lastinv, fire takes; hl_bSlots,
   hl_bFastSwitch) drawn as ammo.cpp's DrawWList. `test_weapons.py slots` PASS TFE.
+46. A moving dynamic light: one of Sam's own Light entities (class 200: colour 2, fall-off 1, hot spot 4, name 11,
+    m_bDynamic 26) made with the properties set before Initialize(), moved by SetPlacement every tick (as Sam's rockets'
+    lights move). It's saved with the game: named, and one found after a load is destroyed.
+- 2026-10-20: Half-Life's flashlight (F, the battery, the light at the view's spot, the HUD's icon). Tomb of Ramses:
+  the middle of the picture 36.5 -> 98.6 bright with it on.

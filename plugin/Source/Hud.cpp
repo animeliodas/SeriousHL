@@ -5,6 +5,7 @@
 #include "Sprite.h"
 #include "Player.h"
 #include "Weapons.h"
+#include "Flashlight.h"
 #include "SBridge.h"
 
 #include <Extras/XGizmo/Objects/StructPtr.h>
@@ -273,6 +274,33 @@ static void DrawAmmo(PIX pixW, PIX pixH, const std::map<std::string, Rect> &gun,
   }
 };
 
+// --- the flashlight (flashlight.cpp CHudFlashlight::Draw): its casing top right, the beam when it's on, the battery
+// as the full one's picture cut from the left
+static void DrawFlashlight(PIX pixW) {
+  const Rect *prEmpty = Find(_mapHud, "flash_empty"), *prFull = Find(_mapHud, "flash_full"), *prBeam = Find(_mapHud, "flash_beam");
+  if (prEmpty == NULL || prFull == NULL) return;
+  const FLOAT fBattery = flashlight::Battery();
+  INDEX r = 255, g = 160, b = 0;
+  if (fBattery < 0.2f) {
+    r = 255;
+    g = 16;
+    b = 16;
+  }
+  ScaleColors(r, g, b, flashlight::On() ? 225 : MIN_ALPHA);
+  const FLOAT fWidth = prFull->w * _fScale;
+  const FLOAT y = (prEmpty->y + prEmpty->h - prFull->y) * _fScale / 2; // (m_prc1->bottom - m_prc2->top) / 2
+  FLOAT x = pixW - fWidth - fWidth / 2;
+  DrawAdditive(prEmpty, x, y, r, g, b);
+  if (flashlight::On() && prBeam != NULL) DrawAdditive(prBeam, pixW - fWidth / 2, y, r, g, b);
+  const INDEX iOffset = (INDEX)(prFull->w * (1.0f - fBattery));
+  if (iOffset < prFull->w) {
+    Rect rc = *prFull;
+    rc.x += iOffset;
+    rc.w -= iOffset;
+    DrawAdditive(&rc, x + iOffset * _fScale, y, r, g, b);
+  }
+};
+
 // --- the weapon menu (ammo.cpp DrawWList): the buckets 1-5 along the top, the open one's guns under it (the one picked
 // bright in its frame, red with no ammo), the others' as small boxes
 static void DrawMenu(const weapons::Menu &menu) {
@@ -425,6 +453,7 @@ void Draw(CDrawPort *pdp, CEntity *pen) {
   weapons::Menu menu;
   weapons::GetMenu(pen, menu);
   DrawMenu(menu);
+  DrawFlashlight(pixW);
 
   xglMatrixMode(GL_PROJECTION);
   xglPopMatrix();

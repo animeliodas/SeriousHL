@@ -13,6 +13,7 @@
 #include "ViewModel.h"
 #include "Hud.h"
 #include "PlayerSounds.h"
+#include "Flashlight.h"
 #include "HlMove.h"
 #include "Rules.h"
 #include "Run.h"
@@ -43,6 +44,7 @@ static void HL_Status(SHELL_FUNC_ARGS) {
   CPrintF("[SeriousHL] %s\n", viewmodel::Status().str_String);
   CPrintF("[SeriousHL] %s\n", hud::Status().str_String);
   CPrintF("[SeriousHL] %s\n", playersounds::Status().str_String);
+  CPrintF("[SeriousHL] %s\n", flashlight::Status().str_String);
   CEntity *pen = player::Local();
   const FLOAT *pfArmor = pen != NULL ? (FLOAT *)player::Prop(pen, player::PROP_ARMOR) : NULL;
   if (pen != NULL) CPrintF("[SeriousHL] health %.1f, armour %.1f\n", ((CLiveEntity *)pen)->en_fHealth, pfArmor != NULL ? *pfArmor : 0.0f);
@@ -489,6 +491,9 @@ static void DeclareUsual(void) {
   _pShell->DeclareSymbol("user FLOAT hl_fMuzzleFlashTime;", &viewmodel::hl_fMuzzleFlashTime);
   _pShell->DeclareSymbol("persistent user INDEX hl_bHud;", &hud::hl_bHud);
   _pShell->DeclareSymbol("persistent user INDEX hl_bPlayerSounds;", &playersounds::hl_bPlayerSounds);
+  _pShell->DeclareSymbol("persistent user INDEX hl_bFlashlight;", &flashlight::hl_bFlashlight);
+  _pShell->DeclareSymbol("persistent user INDEX hl_iFlashlightKey;", &flashlight::hl_iFlashlightKey);
+  _pShell->DeclareSymbol("user INDEX hl_bTestFlashlight;", &flashlight::hl_bTestFlashlight);
   _pShell->DeclareSymbol("persistent user FLOAT hl_fHudScale;", &hud::hl_fHudScale);
   _pShell->DeclareSymbol("user INDEX hl_iTestAlt;", &weapons::hl_iTestAlt);
 
@@ -534,6 +539,7 @@ static void HL_OnStep(void) {
   }
 #ifndef SERIOUSHL_RUN
   TestTick(pen);
+  flashlight::Tick(pen);
 #endif
   movement::Track(pen);
 };
@@ -566,6 +572,7 @@ static void HL_OnWorldLoad(CWorld *pwo, const CTFileName &fnmWorld) {
 #ifndef SERIOUSHL_RUN
   weapons::Reset();
   playersounds::Release();
+  flashlight::Release();
 #endif
 };
 
@@ -574,6 +581,7 @@ static void HL_OnGameStop(void) {
 #ifndef SERIOUSHL_RUN
   weapons::Reset();
   playersounds::Release();
+  flashlight::Release();
 #endif
 };
 
