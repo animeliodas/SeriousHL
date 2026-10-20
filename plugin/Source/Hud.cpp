@@ -2,6 +2,7 @@
 #include "StdH.h"
 #include "Hud.h"
 #include "Gl.h"
+#include "Sprite.h"
 #include "Player.h"
 #include "Weapons.h"
 #include "SBridge.h"
@@ -19,16 +20,6 @@ FLOAT hl_fHudScale = 1.0f;
 
 using namespace gl;
 
-// --- sprites (Half-Life's IDSP version 2): the first frame, padded into a power-of-two texture
-struct Sprite {
-  BOOL bBroken;
-  INDEX iW, iH, iW2, iH2;
-  std::vector<ULONG> aulPixels;
-  GLuint uTexture;
-  HGLRC hContext;
-};
-static std::map<std::string, Sprite *> _mapSprites;
-
 static BOOL ReadFile(const CTString &strFile, std::vector<UBYTE> &aub) {
   try {
     CTFileStream strm;
@@ -41,77 +32,6 @@ static BOOL ReadFile(const CTString &strFile, std::vector<UBYTE> &aub) {
   } catch (char *) {
     return FALSE;
   }
-};
-
-static INDEX PowerOfTwo(INDEX i) {
-  INDEX p = 1;
-  while (p < i && p < 4096) p <<= 1;
-  return p;
-};
-
-static Sprite *LoadSprite(const CTString &strName) {
-  std::map<std::string, Sprite *>::iterator it = _mapSprites.find(strName.str_String);
-  if (it != _mapSprites.end()) return it->second;
-  Sprite *ps = new Sprite;
-  ps->bBroken = TRUE;
-  ps->uTexture = 0;
-  ps->hContext = NULL;
-  _mapSprites[strName.str_String] = ps;
-  CTString strFile = CTString("Models\\SeriousHL\\sprites\\") + strName + ".spr";
-  for (char *pch = strFile.str_String; *pch != 0; pch++) if (*pch == '/') *pch = '\\';
-  std::vector<UBYTE> aub;
-  if (!ReadFile(strFile, aub) || aub.size() < 46 || memcmp(&aub[0], "IDSP", 4) != 0 || *(const int *)&aub[4] != 2) return ps;
-  const int iFormat = *(const int *)&aub[12];
-  const int ctColors = *(const short *)&aub[40];
-  const int iFrame = 42 + ctColors * 3;
-  if (ctColors <= 0 || ctColors > 256 || (int)aub.size() < iFrame + 20) return ps;
-  const UBYTE *pubPalette = &aub[42];
-  const int w = *(const int *)&aub[iFrame + 12], h = *(const int *)&aub[iFrame + 16];
-  if (w <= 0 || h <= 0 || (int)aub.size() < iFrame + 20 + w * h) return ps;
-  const UBYTE *pubPixels = &aub[iFrame + 20];
-  ps->iW = w;
-  ps->iH = h;
-  ps->iW2 = PowerOfTwo(w);
-  ps->iH2 = PowerOfTwo(h);
-  ps->aulPixels.assign(ps->iW2 * ps->iH2, 0);
-  for (int y = 0; y < h; y++) {
-    for (int x = 0; x < w; x++) {
-      const UBYTE i = pubPixels[y * w + x];
-      const UBYTE *rgb = pubPalette + Min((int)i, ctColors - 1) * 3;
-      ULONG r = rgb[0], g = rgb[1], b = rgb[2];
-      if (iFormat == 3 && i == 255) {
-        // SPR_ALPHTEST: the last colour is clear - black, so adding it adds nothing
-        r = g = b = 0;
-      } else if (iFormat == 2) {
-        // SPR_INDEXALPHA: the last colour, as strong as the index
-        const UBYTE *rgbLast = pubPalette + (ctColors - 1) * 3;
-        r = rgbLast[0] * i / 255;
-        g = rgbLast[1] * i / 255;
-        b = rgbLast[2] * i / 255;
-      }
-      ps->aulPixels[y * ps->iW2 + x] = r | (g << 8) | (b << 16) | (255UL << 24);
-    }
-  }
-  ps->bBroken = FALSE;
-  return ps;
-};
-
-static BOOL Bind(Sprite *ps) {
-  if (ps == NULL || ps->bBroken) return FALSE;
-  const HGLRC hNow = xwglGetCurrentContext();
-  if (ps->uTexture == 0 || ps->hContext != hNow) {
-    ps->hContext = hNow;
-    xglGenTextures(1, &ps->uTexture);
-    xglBindTexture(GL_TEXTURE_2D, ps->uTexture);
-    xglTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
-    xglTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-    xglTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP);
-    xglTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP);
-    xglTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, ps->iW2, ps->iH2, 0, GL_RGBA, GL_UNSIGNED_BYTE, &ps->aulPixels[0]);
-    return TRUE;
-  }
-  xglBindTexture(GL_TEXTURE_2D, ps->uTexture);
-  return TRUE;
 };
 
 // --- hud.txt and the guns' weapon_*.txt: "name resolution sprite x y w h", the resolution's own
@@ -177,13 +97,14 @@ static FLOAT _fScale = 1.0f;
 
 static void DrawAdditive(const Rect *pr, FLOAT x, FLOAT y, INDEX r, INDEX g, INDEX b) {
   if (pr == NULL) return;
-  Sprite *ps = LoadSprite(pr->strSprite);
-  if (!Bind(ps)) return;
+  sprite::Sprite *ps = sprite::Load(pr->strSprite);
+  if (!sprite::Bind(ps, 0)) return;
+  const sprite::Frame &fr = ps->aFrames[0];
   xglEnable(GL_TEXTURE_2D);
   xglBlendFunc(GL_ONE, GL_ONE);
   xglColor4f(r / 255.0f, g / 255.0f, b / 255.0f, 1.0f);
-  const FLOAT u0 = (FLOAT)pr->x / ps->iW2, v0 = (FLOAT)pr->y / ps->iH2;
-  const FLOAT u1 = (FLOAT)(pr->x + pr->w) / ps->iW2, v1 = (FLOAT)(pr->y + pr->h) / ps->iH2;
+  const FLOAT u0 = (FLOAT)pr->x / fr.iW2, v0 = (FLOAT)pr->y / fr.iH2;
+  const FLOAT u1 = (FLOAT)(pr->x + pr->w) / fr.iW2, v1 = (FLOAT)(pr->y + pr->h) / fr.iH2;
   const FLOAT x1 = x + pr->w * _fScale, y1 = y + pr->h * _fScale;
   xglBegin(GL_QUADS);
   xglTexCoord2f(u0, v0); xglVertex2f(x, y);
@@ -459,18 +380,14 @@ void Draw(CDrawPort *pdp, CEntity *pen) {
 
 void Shutdown(void) {
   HideSam(FALSE);
-  for (std::map<std::string, Sprite *>::iterator it = _mapSprites.begin(); it != _mapSprites.end(); it++) delete it->second;
-  _mapSprites.clear();
+  sprite::FreeAll();
 };
 
 BOOL Active(void) { return _bSamHidden; };
 
 CTString Status(void) {
   CTString str;
-  INDEX ctSprites = 0;
-  for (std::map<std::string, Sprite *>::iterator it = _mapSprites.begin(); it != _mapSprites.end(); it++) {
-    if (!it->second->bBroken) ctSprites++;
-  }
+  const INDEX ctSprites = sprite::Count();
   str.PrintF("HUD %s; resolution %d, %d sprites; Sam's status line %s; %u frames drawn",
     !hl_bHud ? "Sam's" : _bLoaded ? "Half-Life's" : "Sam's (no Half-Life sprites)", _iRes, ctSprites,
     _bSamHidden ? "off" : "on", _ctDrawn);

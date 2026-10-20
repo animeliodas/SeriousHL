@@ -10,6 +10,8 @@ namespace gl {
 
 typedef void (__stdcall *F_glOrtho)(double, double, double, double, double, double);
 extern F_glOrtho xglOrtho;
+typedef void (__stdcall *F_glVertex3f)(GLfloat, GLfloat, GLfloat);
+extern F_glVertex3f xglVertex3f;
 typedef void (__stdcall *F_glVertex2f)(GLfloat, GLfloat);
 extern F_glVertex2f xglVertex2f;
 typedef void (__stdcall *F_glBegin)(GLenum);

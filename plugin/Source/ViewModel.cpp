@@ -4,6 +4,7 @@
 #include "Player.h"
 #include "HlMove.h"
 #include "Gl.h"
+#include "Sprite.h"
 #include "SBridge.h"
 
 #include <Extras/XGizmo/Objects/StructPtr.h>
@@ -18,6 +19,7 @@ namespace viewmodel {
 
 INDEX hl_bViewModels = TRUE;
 FLOAT hl_fViewModelFov = 90.0f;
+FLOAT hl_fMuzzleFlashTime = 0.04f;
 
 // --- the Half-Life SDK's studio.h (version 10)
 #pragma pack(push, 4)
@@ -63,6 +65,8 @@ struct StudioModel {
 };
 struct StudioMesh { int numtris, triindex, skinref, numnorms, normindex; };
 struct StudioTexture { char name[64]; int flags, width, height, index; };
+struct StudioEvent { int frame, event, type; char options[64]; };
+struct StudioAttachment { char name[32]; int type, bone; float org[3]; float vectors[3][3]; };
 #pragma pack(pop)
 
 static const int STUDIO_LOOPING = 0x0001;
@@ -311,6 +315,61 @@ void SetModel(const char *strModel, INDEX iDraw, INDEX iIdle) {
   _tmStart = Now();
 };
 
+// --- the sequences' events (the client's StudioEvent): 5001, 5011, 5021, 5031 a muzzle flash at attachment 0..3
+// (R_MuzzleFlash: the options' last digit picks sprites/muzzleflash1..3, the tens are the scale in tenths), 5004 a sound
+static SoundCallback _pSound = NULL;
+static INDEX _iEventSeq = -1;
+static TIME _tmEventStart = -1;
+static float _fEventFrame = -1.0f;
+struct Flash { INDEX iAttachment, iSprite, iFrame; float fScale; CTimerValue tvUntil; };
+static Flash _aFlashes[4];
+static INDEX _ctFlashes = 0;
+static ULONG _ctEvents = 0, _ctFlashesDrawn = 0;
+static float _afLastFlash[3] = { 0, 0, 0 };
+static INDEX _iLastFlashWhy = 0;
+
+void SetSoundCallback(SoundCallback pCallback) { _pSound = pCallback; };
+
+static void Events(const Model &m, float fFrame) {
+  const StudioHeader *ph = m.Header();
+  if (_iSeq != _iEventSeq || _tmStart != _tmEventStart) {
+    _iEventSeq = _iSeq;
+    _tmEventStart = _tmStart;
+    _fEventFrame = -1.0f;
+  }
+  if (fFrame < _fEventFrame) _fEventFrame = -1.0f; // (a loop went round)
+  const StudioSeq &seq = m.At<StudioSeq>(ph->seqindex)[_iSeq];
+  if (seq.numevents <= 0 || seq.eventindex + seq.numevents * (int)sizeof(StudioEvent) > (int)m.aubData.size()) {
+    _fEventFrame = fFrame;
+    return;
+  }
+  const StudioEvent *pev = m.At<StudioEvent>(seq.eventindex);
+  for (int e = 0; e < seq.numevents; e++) {
+    const StudioEvent &ev = pev[e];
+    if (!(ev.frame > _fEventFrame && ev.frame <= fFrame)) continue;
+    _ctEvents++;
+    if (ev.event == 5001 || ev.event == 5011 || ev.event == 5021 || ev.event == 5031) {
+      if (_ctFlashes >= 4) continue;
+      const int iType = atoi(ev.options);
+      Flash &fl = _aFlashes[_ctFlashes++];
+      fl.iAttachment = (ev.event - 5001) / 10;
+      fl.iSprite = (iType % 10) % 3;
+      fl.fScale = (iType / 10) * 0.1f;
+      if (fl.fScale == 0.0f) fl.fScale = 0.5f;
+      fl.iFrame = rand();
+      // (Half-Life's lasts till the next frame: here a few)
+      fl.tvUntil = _pTimer->GetHighPrecisionTimer() + CTimerValue((double)hl_fMuzzleFlashTime);
+    } else if (ev.event == 5004 && _pSound != NULL) {
+      char strSound[64];
+      strncpy(strSound, ev.options, 63);
+      strSound[63] = 0;
+      for (char *pch = strSound; *pch != 0; pch++) if (*pch == '/') *pch = '\\';
+      _pSound(strSound);
+    }
+  }
+  _fEventFrame = fFrame;
+};
+
 void Play(INDEX iSequence) {
   _iSeq = iSequence;
   _tmStart = Now();
@@ -384,7 +443,9 @@ static inline void ToEye(const float *v, float *e) {
 static void Draw(Model &m, CDrawPort *pdp, const FLOAT3D &vLightEye, FLOAT fAmbient, FLOAT fDiffuse) {
   const StudioHeader *ph = m.Header();
   static Mat34 amBones[MAX_BONES];
-  BoneTransforms(m, _iSeq, Frame(m, _pTimer->GetLerpedCurrentTick()), amBones);
+  const float fFrame = Frame(m, _pTimer->GetLerpedCurrentTick());
+  BoneTransforms(m, _iSeq, fFrame, amBones);
+  Events(m, fFrame);
   // the bob: the whole gun turned (yaw -bob/2, roll -bob, pitch -bob*0.3) and moved (ahead bob*0.4, up bob)
   const float fBob = Bob();
   if (fBob != 0.0f) {
@@ -514,6 +575,47 @@ static void Draw(Model &m, CDrawPort *pdp, const FLOAT3D &vLightEye, FLOAT fAmbi
       }
     }
   }
+  // the muzzle flashes: sprites facing the eye at their attachments, added
+  const CTimerValue tvNow = _pTimer->GetHighPrecisionTimer();
+  INDEX ctKept = 0;
+  for (INDEX f = 0; f < _ctFlashes; f++) {
+    Flash &fl = _aFlashes[f];
+    if (tvNow > fl.tvUntil) continue;
+    _aFlashes[ctKept++] = fl;
+    _iLastFlashWhy = 1;
+    if (fl.iAttachment >= ph->numattachments) continue;
+    const StudioAttachment &att = m.At<StudioAttachment>(ph->attachmentindex)[fl.iAttachment];
+    const Mat34 &mb = amBones[att.bone >= 0 && att.bone < ph->numbones ? att.bone : 0];
+    float w[3], e[3];
+    for (int i = 0; i < 3; i++) w[i] = att.org[0] * mb[i][0] + att.org[1] * mb[i][1] + att.org[2] * mb[i][2] + mb[i][3];
+    ToEye(w, e);
+    memcpy(_afLastFlash, e, sizeof(e));
+    _iLastFlashWhy = 2;
+    sprite::Sprite *ps = sprite::Load(CTString(0, "muzzleflash%d", fl.iSprite + 1));
+    if (ps == NULL || ps->bBroken) continue;
+    const INDEX iFrame = fl.iFrame % (INDEX)ps->aFrames.size();
+    _iLastFlashWhy = 3;
+    if (!sprite::Bind(ps, iFrame)) continue;
+    _iLastFlashWhy = 4;
+    _ctFlashesDrawn++;
+    const sprite::Frame &fr = ps->aFrames[iFrame];
+    const float x0 = e[0] + fr.iOriginX * fl.fScale, y0 = e[1] + fr.iOriginY * fl.fScale;
+    const float x1 = x0 + fr.iW * fl.fScale, y1 = y0 - fr.iH * fl.fScale;
+    const float u1 = (float)fr.iW / fr.iW2, v1 = (float)fr.iH / fr.iH2;
+    gl::xglDisable(GL_ALPHA_TEST);
+    gl::xglEnable(GL_BLEND);
+    gl::xglBlendFunc(GL_ONE, GL_ONE);
+    gl::xglDepthMask(GL_FALSE);
+    gl::xglColor4f(1.0f, 1.0f, 1.0f, 1.0f);
+    gl::xglBegin(GL_QUADS);
+    gl::xglTexCoord2f(0.0f, 0.0f); gl::xglVertex3f(x0, y0, e[2]);
+    gl::xglTexCoord2f(u1, 0.0f); gl::xglVertex3f(x1, y0, e[2]);
+    gl::xglTexCoord2f(u1, v1); gl::xglVertex3f(x1, y1, e[2]);
+    gl::xglTexCoord2f(0.0f, v1); gl::xglVertex3f(x0, y1, e[2]);
+    gl::xglEnd();
+  }
+  _ctFlashes = ctKept;
+
   gl::xglMatrixMode(GL_PROJECTION);
   gl::xglPopMatrix();
   gl::xglMatrixMode(GL_TEXTURE);
@@ -621,9 +723,9 @@ CTString Status(void) {
   for (std::map<std::string, Model *>::iterator it = _mapModels.begin(); it != _mapModels.end(); it++) {
     if (!it->second->bBroken) ctLoaded++;
   }
-  str.PrintF("view models %s; %d loaded; in hand %s, sequence %d (idle %d), %s, %u frames drawn, %u triangles",
+  str.PrintF("view models %s; %d loaded; in hand %s, sequence %d (idle %d), %s, %u frames drawn, %u triangles, %u events, flashes %u drawn (last at %.1f %.1f %.1f, stage %d)",
     !_bHooked ? "unavailable" : hl_bViewModels ? "Half-Life's" : "Sam's", ctLoaded,
-    _strModel == "" ? "Sam's" : _strModel.str_String, _iSeq, _iIdle, _bDrawn ? "drawn" : "not drawn", _ctFrames, _ctTris);
+    _strModel == "" ? "Sam's" : _strModel.str_String, _iSeq, _iIdle, _bDrawn ? "drawn" : "not drawn", _ctFrames, _ctTris, _ctEvents, _ctFlashesDrawn, _afLastFlash[0], _afLastFlash[1], _afLastFlash[2], _iLastFlashWhy);
   return str;
 };
 

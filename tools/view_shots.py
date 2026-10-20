@@ -19,6 +19,7 @@ def main() -> None:
     ap.add_argument("--guns", default="colt")
     ap.add_argument("--out", default=str(Path(__file__).resolve().parents[2] / "_shots" / "vm"))
     ap.add_argument("--fire", type=int, default=0, help="fire for this many ticks, then shoot the picture mid-way")
+    ap.add_argument("--delay", type=float, default=0.25)
     a = ap.parse_args()
     game = test_hl.Game(a.game)
     kind = "tse" if (game.folder / "Bin" / "EntitiesMP.dll").exists() else "tfe"
@@ -35,7 +36,7 @@ def main() -> None:
         time.sleep(1.5)
         if a.fire:
             game.run(f"hl_iTestFire={a.fire};")
-            time.sleep(0.25)
+            time.sleep(a.delay)
         out = f"{a.out}_{kind}_{gun}.png"
         subprocess.run(["bash", "-c", f'um win shot --exe SeriousSam_Custom.exe "{out}" --scale 0.5'], check=False, capture_output=True)
         st = game.run("hl_Status();", want="view models")

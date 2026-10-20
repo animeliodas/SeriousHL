@@ -471,6 +471,7 @@ static void DeclareUsual(void) {
   _pShell->DeclareSymbol("persistent user INDEX hl_bHevArmor;", &hev::hl_bHevArmor);
   _pShell->DeclareSymbol("persistent user INDEX hl_bViewModels;", &viewmodel::hl_bViewModels);
   _pShell->DeclareSymbol("persistent user FLOAT hl_fViewModelFov;", &viewmodel::hl_fViewModelFov);
+  _pShell->DeclareSymbol("user FLOAT hl_fMuzzleFlashTime;", &viewmodel::hl_fMuzzleFlashTime);
   _pShell->DeclareSymbol("persistent user INDEX hl_bHud;", &hud::hl_bHud);
   _pShell->DeclareSymbol("persistent user FLOAT hl_fHudScale;", &hud::hl_fHudScale);
   _pShell->DeclareSymbol("user INDEX hl_iTestAlt;", &weapons::hl_iTestAlt);

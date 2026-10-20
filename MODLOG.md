@@ -170,3 +170,8 @@ Route: rules rewritten in the host (pattern "guest's rules headless"), on the Se
 42. Two games at once: the one in the background doesn't get to skip its level intro (no focus) - one game at a time
     in tests.
 - 2026-10-20: Half-Life's HUD (health, HEV battery, ammo, second ammo, the gun's crosshair) and the view model's bob.
+43. View model events (mstudioevent_t: frame, event, type, options[64]; 76 bytes) in the sequences: 5001/5011/5021/5031
+    a muzzle flash at attachment 0..3 (options "31": sprites/muzzleflash(1 % 3 + 1).spr at scale 0.3), 5004 a sound
+    (the Glock's, the .357's, the MP5's reload sounds come this way). Attachments: 88 bytes (name, type, bone, org,
+    vectors); the header's numattachments is its 19th int after flags.
+- 2026-10-20: muzzle flashes and the models' own reload sounds; sprites shared (Sprite.cpp: all frames).

@@ -152,6 +152,14 @@ static void ViewHolster(void) {
 };
 
 static void View(INDEX iSeq) { viewmodel::Play(iSeq); };
+
+// the view model's own sound events (the Glock's, the .357's, the MP5's reloads): on the second channel
+static void Sound(CEntity *pen, CEntity *pw, const char *strHL, INDEX iSound, BOOL bSecond, ULONG ulFlags);
+static void ModelSound(const char *strSound) {
+  CEntity *pen = player::Local();
+  CEntity *pw = pen != NULL ? player::PropEntity(pen, PROP_WEAPONS) : NULL;
+  if (pw != NULL) Sound(pen, pw, strSound, -1, TRUE, 0);
+};
 static ULONG _ctShots = 0;
 static FLOAT _fLastDamage = 0;
 static const char *_strLast = "";
@@ -402,7 +410,10 @@ static void StartReload(CEntity *pen, CEntity *pw, Gun g, GunState &gs, TIME tmN
   if (gs.tmReloaded > 0 || gs.iClip >= _aiClip[g]) return;
   if (piReserve != NULL && *piReserve <= 0) return;
   gs.tmReloaded = tmNow + _afReload[g];
-  if (g == G_SHOTGUN) Sound(pen, pw, "weapons\\reload1.wav|weapons\\reload3.wav", SND_DOUBLESHOTGUN_RELOAD, TRUE);
+  // (the Glock's, the .357's and the MP5's come with their view models' reloads)
+  const BOOL bModelSounds = viewmodel::Ready() && (g == G_PYTHON || g == G_GLOCK || g == G_MP5);
+  if (bModelSounds) {
+  } else if (g == G_SHOTGUN) Sound(pen, pw, "weapons\\reload1.wav|weapons\\reload3.wav", SND_DOUBLESHOTGUN_RELOAD, TRUE);
   else if (g == G_PYTHON) Sound(pen, pw, "weapons\\357_reload1.wav", SND_COLT_RELOAD, TRUE);
   else if (g == G_GLOCK) Sound(pen, pw, "items\\9mmclip1.wav", SND_COLT_RELOAD, TRUE);
   else if (g == G_MP5) Sound(pen, pw, "items\\clipinsert1.wav", -1, TRUE);
@@ -762,6 +773,7 @@ BOOL Init(void) {
   _symFY.Find("wpn_fFY");
   Reset();
   movement::SetActionFilter(&Filter);
+  viewmodel::SetSoundCallback(&ModelSound);
   if (!_bReady) CPrintF(SB_TAG " Sam's weapon functions aren't in the Entities library: Sam's weapons stay\n");
   return _bReady;
 };

@@ -18,6 +18,7 @@ namespace viewmodel {
 
 extern INDEX hl_bViewModels; // 1: Half-Life's view models where there is one; 0: Sam's weapon models
 extern FLOAT hl_fViewModelFov; // the horizontal field of view at 4:3 the view model is drawn with (Half-Life: 90)
+extern FLOAT hl_fMuzzleFlashTime; // how long a muzzle flash shows, seconds (Half-Life's: till the next frame)
 
 // Plugin startup: the weapon model's drawing patched. FALSE: Sam's models stay.
 BOOL Init(void);
@@ -32,6 +33,9 @@ void SetIdle(INDEX iIdle);
 // The body group values (bodypart's sub-model numbers packed as the SDK's pev->body).
 void SetBody(INDEX iBody);
 BOOL Ready(void); // a model is loaded and drawn for the gun in hand
+// The model's own sound events (5004: "items/9mmclip1.wav", Half-Life's sound folder's) go to this.
+typedef void (*SoundCallback)(const char *strSound);
+void SetSoundCallback(SoundCallback pCallback);
 CTString Status(void);
 
 }; // namespace

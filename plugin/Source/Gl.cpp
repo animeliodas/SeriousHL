@@ -6,6 +6,7 @@ namespace gl {
 
 F_glOrtho xglOrtho = NULL;
 F_glVertex2f xglVertex2f = NULL;
+F_glVertex3f xglVertex3f = NULL;
 F_glBegin xglBegin = NULL;
 F_glEnd xglEnd = NULL;
 F_glVertex3fv xglVertex3fv = NULL;
@@ -49,6 +50,7 @@ BOOL Load(void) {
   if (hGL == NULL) return FALSE;
   if ((xglOrtho = (F_glOrtho)GetProcAddress(hGL, "glOrtho")) == NULL) return FALSE;
   if ((xglVertex2f = (F_glVertex2f)GetProcAddress(hGL, "glVertex2f")) == NULL) return FALSE;
+  if ((xglVertex3f = (F_glVertex3f)GetProcAddress(hGL, "glVertex3f")) == NULL) return FALSE;
   if ((xglBegin = (F_glBegin)GetProcAddress(hGL, "glBegin")) == NULL) return FALSE;
   if ((xglEnd = (F_glEnd)GetProcAddress(hGL, "glEnd")) == NULL) return FALSE;
   if ((xglVertex3fv = (F_glVertex3fv)GetProcAddress(hGL, "glVertex3fv")) == NULL) return FALSE;
