@@ -14,6 +14,7 @@
     <ClInclude Include="Source\StdH.h" />
     <ClInclude Include="Source\Flashlight.h" />
     <ClInclude Include="Source\Gl.h" />
+    <ClInclude Include="Source\Grenades.h" />
     <ClInclude Include="Source\Hev.h" />
     <ClInclude Include="Source\Hud.h" />
     <ClInclude Include="Source\HlMove.h" />
@@ -32,6 +33,7 @@
     <ClCompile Include="Source\Main.cpp" />
     <ClCompile Include="Source\Flashlight.cpp" />
     <ClCompile Include="Source\Gl.cpp" />
+    <ClCompile Include="Source\Grenades.cpp" />
     <ClCompile Include="Source\Hev.cpp" />
     <ClCompile Include="Source\Hud.cpp" />
     <ClCompile Include="Source\HlMove.cpp" />

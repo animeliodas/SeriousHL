@@ -191,3 +191,11 @@ Route: rules rewritten in the host (pattern "guest's rules headless"), on the Se
     lights move). It's saved with the game: named, and one found after a load is destroyed.
 - 2026-10-20: Half-Life's flashlight (F, the battery, the light at the view's spot, the HUD's icon). Tomb of Ramses:
   the middle of the picture 36.5 -> 98.6 bright with it on.
+47. Thrown things: Sam's grenade (FireGrenade) re-placed (SetPlacement) and given Half-Life's velocity, damage and fuse
+    (the timer of the state it waits in); debris collision so a monster doesn't set it off; every tick the level's
+    gravity taken back to Half-Life's half (pev->gravity 0.5: 400 u/s²) while it's in the air, Sam's bounce sound
+    (Projectile m_soEffect, 30) stopped for Half-Life's, and once it's gone Sam's explosion effects near it (BasicEffect,
+    class 601, m_soEffect 30) quiet for explode3-5. Looking level: first touch 8.1 m ahead.
+48. Cinematics and auto actions: the guns' filter leaves the action alone (the fire skips the intro, as Sam's).
+- 2026-10-20: Half-Life's hand grenade (pin, cook, throw by the view's pitch), satchel and MP5 grenade with their
+  sounds; the menu's fire no longer shoots the gun in hand; no shots in cinematics.

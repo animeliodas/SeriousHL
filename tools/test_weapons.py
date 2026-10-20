@@ -17,7 +17,11 @@ at a target, its health):
   satchel  a satchel (on the cannon) waits past Sam's 3 s fuse, then the first fire sets it off: damage at the target;
   crossbow (TSE, on the sniper rifle) one bolt: 50;
   slots    Half-Life's weapon menu: 3 opens it on the MP5, 3 again the shotgun, fire takes it; the flip key back; with
-           hl_bFastSwitch 1, 1 takes the crowbar at once (its slot's only one), 2 still opens the menu (two in it).
+           hl_bFastSwitch 1, 1 takes the crowbar at once (its slot's only one), 2 still opens the menu (two in it);
+           and the fire that takes a gun from the menu shoots nothing of the one in hand;
+  grenade  the hand grenade (on the grenade launcher), looking level: thrown 0.5 s after the pin at 400 u/s 10 degrees up,
+           half gravity - first touches the floor 7-11 m ahead (Half-Life's arc from the eyes: ~9 m); goes off 3 s after the
+           pin with Half-Life's explosion sound, bounces with its.
 Prints PASS/FAIL per check.
 """
 import argparse
@@ -28,7 +32,7 @@ import time
 import test_hl
 import test_loudness
 
-ALL = ("damage", "crowbar", "rate", "clip", "gauss", "sounds", "hev", "egon", "satchel", "crossbow", "slots")
+ALL = ("damage", "crowbar", "rate", "clip", "gauss", "sounds", "hev", "egon", "satchel", "crossbow", "slots", "grenade")
 UNIT = test_hl.UNIT
 # Sam's WeaponType and the key slots: TFE / TSE
 SAM = {"tfe": {"knife": (1, 1), "colt": (2, 2), "doublecolt": (3, 2), "shotgun": (4, 3), "tommygun": (6, 4), "laser": (14, 8),
@@ -40,7 +44,8 @@ SAM = {"tfe": {"knife": (1, 1), "colt": (2, 2), "doublecolt": (3, 2), "shotgun":
 class Guns:
     def __init__(self, game: test_hl.Game, kind: str):
         self.game = game
-        self.sam = SAM[kind]
+        self.sam = dict(SAM[kind])
+        self.kind = kind
         self.target = None
 
     def in_hand(self) -> int:
@@ -266,9 +271,48 @@ def check_slots(game, guns, results):
     picks.append(("fast 2: still the menu (no switch)", hand() == s["knife"][0]))
     press("hl_iTestFire=1;")
     picks.append(("... fire takes the Glock", hand() == s["doublecolt"][0]))
-    game.run("hl_bFastSwitch=0;", "hl_bSlots=0;")
+    # the menu's fire doesn't shoot the gun in hand (held a while, as a click is)
+    game.run("hl_bFastSwitch=0;")
+    n0 = guns.shots()
+    press("hl_iTestSelect=3;")
+    press("hl_iTestFire=6;", 1.0)
+    picks.append(("the fire that takes the MP5 shoots no Glock", guns.shots() == n0 and hand() == s["tommygun"][0]))
+    game.run("hl_bSlots=0;")
     results.append(("slots: Half-Life's weapon menu on Sam's guns", all(ok for _, ok in picks),
                     ", ".join(f"{name} {'yes' if ok else 'NO'}" for name, ok in picks)))
+
+
+def check_grenade(game, guns, results):
+    sam = {"tfe": (9, 6), "tse": (9, 5)}[guns.kind]
+    guns.sam["grenade"] = sam
+    if not guns.take("grenade"):
+        results.append(("grenade", False, "no grenade launcher"))
+        return
+    game.run("hl_fTestPitch=0.01;")
+    time.sleep(0.5)
+    where = re.findall(r"where: ([\d.-]+) ([\d.-]+) ([\d.-]+)", game.run("hl_Where();", want="where:"))
+    x0, z0 = float(where[-1][0]), float(where[-1][2])
+    mark = len(game.text())
+    game.run("hl_iTestFire=2;")
+    time.sleep(5.0)
+    log = game.text()[mark:]
+    game.run("hl_fTestPitch=0;")
+    thrown = re.findall(r"thrown \(hand grenade\) at [\d.-]+ [\d.-]+ [\d.-]+ \(([\d.]+) s\), ([\d.]+) m/s, fuse ([\d.]+) s", log)
+    went = re.findall(r"thrown went off at ([\d.-]+) ([\d.-]+) ([\d.-]+) \(([\d.]+) s\)(, Half-Life's sound)?", log)
+    first = re.findall(r"thrown bounced first at ([\d.-]+) ([\d.-]+) ([\d.-]+)", log)
+    st = game.run("hl_Status();", want="thrown:")
+    bounces = re.findall(r"(\d+) bounces", st)
+    if not thrown or not went:
+        results.append(("grenade: Half-Life's hand grenade", False, f"thrown {len(thrown)}, went off {len(went)}"))
+        return
+    tm_throw, speed, fuse = float(thrown[-1][0]), float(thrown[-1][1]), float(thrown[-1][2])
+    tm_off = float(went[-1][3])
+    dist = math.hypot(float(first[-1][0]) - x0, float(first[-1][2]) - z0) if first else -1.0
+    ok = abs(speed - 400 * UNIT) < 0.6 and abs(fuse - 2.5) < 0.11 and abs(tm_off - tm_throw - fuse) < 0.2 and 7 <= dist <= 11 \
+        and went[-1][4] != "" and bounces and int(bounces[-1]) > 0
+    results.append(("grenade: thrown as Half-Life's (400 u/s, fuse 3 s from the pin), lands ahead, its sounds", ok,
+                    f"{speed:.1f} m/s, fuse {fuse:.2f} s after a 0.5 s throw, off {tm_off - tm_throw:.2f} s later, first touch {dist:.1f} m ahead, "
+                    f"explosion sound {'Half-Life' if went[-1][4] else 'Sam'}, {bounces[-1] if bounces else 0} bounce sounds"))
 
 
 def hit(game, args: str):
@@ -320,7 +364,7 @@ def main() -> None:
         test_hl.launch(game)
     checks = {"damage": check_damage, "crowbar": check_crowbar, "rate": check_rate, "clip": check_clip, "gauss": check_gauss,
               "sounds": check_sounds, "hev": check_hev, "egon": check_egon, "satchel": check_satchel,
-              "crossbow": check_crossbow, "slots": check_slots}
+              "crossbow": check_crossbow, "slots": check_slots, "grenade": check_grenade}
     results = []
     for name in a.only.split(","):
         try:

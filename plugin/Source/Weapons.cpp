@@ -4,6 +4,7 @@
 #include "Hev.h"
 #include "ViewModel.h"
 #include "Sounds.h"
+#include "Grenades.h"
 #include "HlMove.h"
 #include "Movement.h"
 #include "Player.h"
@@ -116,10 +117,9 @@ static BOOL _bOldFire = FALSE, _bOldAlt = FALSE;
 static BOOL _bCharging = FALSE;   // gauss
 static TIME _tmChargeStart = 0, _tmChargeDrain = 0;
 static BOOL _bPinPulled = FALSE;  // hand grenade
+static TIME _tmPinPulled = 0, _tmRedraw = 0;
 static BOOL _bEgonOn = FALSE;     // egon
 static TIME _tmEgonPulse = 0, _tmEgonRun = 0;
-static ULONG _aulSatchels[16];    // satchels out (Sam's grenades, their ids)
-static INDEX _ctSatchels = 0;
 
 // --- Half-Life's view models (ViewModel.h): the file, and the SDK's weapon animation numbers (draw, idle, holster)
 struct ViewGun { const char *strModel; INDEX iDraw, iIdle, iHolster; };
@@ -313,57 +313,25 @@ static void EgonOff(CEntity *pen, CEntity *pw) {
   Log("off", G_EGON, 0, -1);
 };
 
-// --- satchels: Sam's grenades with no fuse, set off by the player
-static CEntity *Satchel(ULONG ulID) {
-  CEntity *penS = physics::FindEntity(ulID);
-  return penS != NULL && strcmp(penS->GetClass()->ec_pdecDLLClass->dec_strName, "Projectile") == 0 ? penS : NULL;
-};
-
-static INDEX Satchels(void) {
-  INDEX ct = 0;
-  for (INDEX i = 0; i < _ctSatchels; i++) {
-    if (Satchel(_aulSatchels[i]) != NULL) _aulSatchels[ct++] = _aulSatchels[i];
-  }
-  return _ctSatchels = ct;
-};
-
-static BOOL ThrowSatchel(CEntity *pen, CEntity *pw) {
+// --- Sam's grenade made (CPlayerWeapons::FireGrenade) and handed to Grenades.h as Half-Life's: placed where Half-Life's
+// starts, its velocity and fuse
+static CEntity *NewGrenade(CEntity *pw, INDEX iPower, const FLOAT3D &vFrom) {
   CWorld *pwo = IWorld::GetWorld();
-  if (_pFireGrenade == NULL || pwo == NULL || _ctSatchels >= (INDEX)ARRAYCOUNT(_aulSatchels)) return FALSE;
+  if (_pFireGrenade == NULL || pwo == NULL) return NULL;
   const ULONG ulFirst = pwo->wo_ulNextEntityID;
-  (pw->*_pFireGrenade)(0);
-  CEntity *penS = NULL;
+  (pw->*_pFireGrenade)(iPower);
+  CEntity *penG = NULL;
   FOREACHINDYNAMICCONTAINER(pwo->wo_cenEntities, CEntity, iten) {
     if (iten->en_ulID >= ulFirst && strcmp(iten->GetClass()->ec_pdecDLLClass->dec_strName, "Projectile") == 0) {
-      penS = &*iten;
+      penG = &*iten;
       break;
     }
   }
-  if (penS == NULL) return FALSE;
-  // thrown at 274 u/s plus the player's own speed; it goes off on nothing it meets, comes to rest and waits
-  CMovableEntity *pmS = (CMovableEntity *)penS;
-  pmS->en_vCurrentTranslationAbsolute = Forward(pen) * (274.0f * Unit()) + ((CMovableEntity *)pen)->en_vCurrentTranslationAbsolute;
-  pmS->en_vDesiredTranslationRelative = FLOAT3D(0, 0, 0);
-  penS->SetCollisionFlags(ECF_SATCHEL);
-  // RadiusDamage(150, 2.5 x 150 units): from the middle down to nothing at the edge
-  FLOAT *pf;
-  if ((pf = (FLOAT *)player::Prop(penS, PJ_DAMAGE)) != NULL) *pf = 0.0f;
-  if ((pf = (FLOAT *)player::Prop(penS, PJ_RANGEDAMAGE)) != NULL) *pf = DMG_SATCHEL;
-  if ((pf = (FLOAT *)player::Prop(penS, PJ_HOTSPOT)) != NULL) *pf = 0.1f;
-  if ((pf = (FLOAT *)player::Prop(penS, PJ_FALLOFF)) != NULL) *pf = 2.5f * DMG_SATCHEL * Unit();
-  // (its fly time is the timer of the state it waits in)
-  ((CRationalEntity *)penS)->SetTimerAfter(3600.0f);
-  _aulSatchels[_ctSatchels++] = penS->en_ulID;
-  return TRUE;
+  if (penG != NULL) penG->SetPlacement(CPlacement3D(vFrom, penG->GetPlacement().pl_OrientationAngle));
+  return penG;
 };
 
-static void Detonate(void) {
-  for (INDEX i = 0; i < _ctSatchels; i++) {
-    CEntity *penS = Satchel(_aulSatchels[i]);
-    if (penS != NULL) ((CRationalEntity *)penS)->SetTimerAfter(0.05f);
-  }
-  _ctSatchels = 0;
-};
+static FLOAT3D Eyes(CEntity *pen) { return IWorld::GetViewpoint((CPlayerEntity *)pen, FALSE).pl_PositionVector; };
 
 static const char *_astrHudFile[G_COUNT] = { NULL, "weapon_crowbar", "weapon_357", "weapon_9mmhandgun", "weapon_shotgun",
   "weapon_9mmar", "weapon_rpg", "weapon_handgrenade", "weapon_gauss", "weapon_egon", "weapon_satchel", "weapon_crossbow" };
@@ -433,6 +401,7 @@ static INDEX _iTargetSam = -1, _ctTries = 0;
 static BOOL _bAskedLastTick = FALSE;
 static Gun _gLast = G_NONE, _gHolding = G_NONE;
 static ULONG _ctPicks = 0;
+static BOOL _bHoldFire = FALSE;
 
 static void MenuSound(CEntity *pen, CEntity *pw, const char *strSound) {
   Sound(pen, pw, strSound, -1, TRUE);
@@ -535,10 +504,18 @@ static BOOL Select(CEntity *pen, CEntity *pw, CPlayerAction &pa, Gun gInHand) {
   BOOL bFireTaken = FALSE;
   if (_bMenu && (ulPressed & PLACT_FIRE)) {
     Take(pen, pw, _iMenu);
-    bFireTaken = TRUE;
+    _bHoldFire = TRUE;
   }
-  // a fire held since taking a gun from the menu doesn't shoot it at once
-  if (bFireTaken) pa.pa_ulButtons &= ~PLACT_FIRE;
+  // (fire that took a gun from the menu shoots nothing till it's let go and Sam has the gun in hand)
+  if (_bHoldFire) {
+    const BOOL bSwitching = _iTargetSam > 0 || player::PropIndex(pw, PW_CURRENT, 0) != player::PropIndex(pw, PW_WANTED, 0);
+    if ((pa.pa_ulButtons & PLACT_FIRE) || bSwitching) {
+      pa.pa_ulButtons &= ~PLACT_FIRE;
+      bFireTaken = TRUE;
+    } else {
+      _bHoldFire = FALSE;
+    }
+  }
 
   // Sam asked for the host: his slot key, again a tick later if he took the other of the pair
   if (_iTargetSam > 0) {
@@ -633,6 +610,14 @@ static void Filter(CEntity *pen, CPlayerAction &pa) {
   if (!hl_bWeapons || !(pen->GetFlags() & ENF_ALIVE)) {
     EgonOff(pen, pw);
     ViewTake(G_NONE);
+    return;
+  }
+  // a cinematic (a level's intro or end) or an auto action: nothing of the guns' - the fire is Sam's (it skips one)
+  if (player::PropEntity(pen, player::PROP_CAMERA) != NULL || player::PropEntity(pen, player::PROP_ACTION_MARKER) != NULL) {
+    EgonOff(pen, pw);
+    _bCharging = FALSE;
+    _bPinPulled = FALSE;
+    _bMenu = FALSE;
     return;
   }
   const INDEX iSam = player::PropIndex(pw, PW_CURRENT, 0);
@@ -761,7 +746,9 @@ static void Filter(CEntity *pen, CPlayerAction &pa) {
       // the M203: a grenade (Sam's), from the grenades
       INDEX *piGrenades = (INDEX *)player::Prop(pw, PW_GRENADES);
       if (piGrenades != NULL && *piGrenades > 0 && _pFireGrenade != NULL) {
-        (pw->*_pFireGrenade)(1);
+        const FLOAT3D vAhead = Forward(pen);
+        CEntity *penG = NewGrenade(pw, 1, Eyes(pen) + vAhead * (16.0f * Unit()));
+        if (penG != NULL) grenades::Track(penG, grenades::K_CONTACT, vAhead * (800.0f * Unit()), -1.0f);
         (*piGrenades)--;
         gs.tmNext = tmNow + 1.0f;
         Sound(pen, pw, "weapons\\glauncher.wav|weapons\\glauncher2.wav", SND_GRENADE_FIRE, FALSE);
@@ -795,18 +782,35 @@ static void Filter(CEntity *pen, CPlayerAction &pa) {
     }
     break;
   case G_GRENADE:
-    // the pin comes out on the press, it flies on the release
+    // handgrenade.cpp: the pin comes out on the press; let go (and half a second on), it's thrown - the higher the view,
+    // the faster ((90 - pitch) x 4, at most 500 u/s; the throw 10 degrees over the view), with his own speed; its fuse
+    // is 3 s from the pin, so holding it cooks it
+    if (_tmRedraw > 0 && Due(tmNow, _tmRedraw)) {
+      _tmRedraw = 0;
+      if (iReserve > 0) View(7); // HANDGRENADE_DRAW
+    }
     if (bFire && !_bPinPulled && Due(tmNow, gs.tmNext) && iReserve > 0) {
       _bPinPulled = TRUE;
+      _tmPinPulled = tmNow;
       View(2); // HANDGRENADE_PINPULL
-    } else if (!bFire && _bPinPulled && _pFireGrenade != NULL) {
+    } else if (!bFire && _bPinPulled && Due(tmNow, _tmPinPulled + 0.5f)) {
+      const CPlacement3D plView = IWorld::GetViewpoint((CPlayerEntity *)pen, FALSE);
+      FLOAT fPitch = -plView.pl_OrientationAngle(2); // (Half-Life's: down positive)
+      fPitch = fPitch < 0.0f ? -10.0f + fPitch * (80.0f / 90.0f) : -10.0f + fPitch * (100.0f / 90.0f);
+      const FLOAT fSpeed = Min((90.0f - fPitch) * 4.0f, 500.0f);
+      FLOAT3D vThrow;
+      AnglesToDirectionVector(ANGLE3D(plView.pl_OrientationAngle(1), -fPitch, 0), vThrow);
+      CEntity *penG = NewGrenade(pw, 0, plView.pl_PositionVector + vThrow * (16.0f * Unit()));
+      if (penG != NULL) {
+        const FLOAT3D vVelocity = vThrow * (fSpeed * Unit()) + ((CMovableEntity *)pen)->en_vCurrentTranslationAbsolute;
+        grenades::Track(penG, grenades::K_HAND, vVelocity, Max(_tmPinPulled + 3.0f - tmNow, 0.0f));
+      }
       _bPinPulled = FALSE;
-      (pw->*_pFireGrenade)(0);
       if (piReserve != NULL) (*piReserve)--;
       gs.tmNext = tmNow + 0.5f;
-      Sound(pen, pw, NULL, SND_GRENADE_FIRE, FALSE);
+      _tmRedraw = tmNow + 0.5f;
       Anim(pw, "Fire");
-      View(3); // HANDGRENADE_THROW1
+      View(fSpeed < 500.0f ? 3 : 4); // HANDGRENADE_THROW1, _THROW2
       _ctShots++;
       Log("throw", g, 0, piReserve != NULL ? *piReserve : -1);
     }
@@ -892,25 +896,30 @@ static void Filter(CEntity *pen, CPlayerAction &pa) {
     break;
   case G_SATCHEL: {
     // the first fire throws one, or sets off those out; the second throws another
-    const INDEX ctOut = Satchels();
+    const INDEX ctOut = grenades::Satchels();
     // the radio in hand while some are out (SATCHEL_RADIO_DRAW), the satchel again when none are (SATCHEL_DRAW)
     if ((ctOut > 0) != _bRadio && Due(tmNow, gs.tmNext)) {
       _bRadio = ctOut > 0;
       viewmodel::SetModel(_bRadio ? "v_satchel_radio.mdl" : "v_satchel.mdl", 2, 0);
     }
     if (bFire && ctOut > 0 && Due(tmNow, gs.tmNext)) {
-      Detonate();
+      grenades::Detonate(pen);
       View(3); // SATCHEL_RADIO_FIRE
       gs.tmNext = tmNow + 0.5f;
       _ctShots++;
       _fLastDamage = DMG_SATCHEL;
       Log("detonate", g, ctOut, iReserve);
-    } else if ((bFire || bAlt) && Due(tmNow, gs.tmNext) && iReserve > 0 && ThrowSatchel(pen, pw)) {
-      if (piReserve != NULL) (*piReserve)--;
-      gs.tmNext = tmNow + 1.0f;
-      Anim(pw, "Fire");
-      if (!_bRadio) View(3); // SATCHEL_DROP
-      Log("throw", g, _ctSatchels, piReserve != NULL ? *piReserve : -1);
+    } else if ((bFire || bAlt) && Due(tmNow, gs.tmNext) && iReserve > 0) {
+      CMovableEntity *pmen = (CMovableEntity *)pen;
+      CEntity *penS = NewGrenade(pw, 0, pen->GetPlacement().pl_PositionVector - pmen->en_vGravityDir * 1.0f);
+      if (penS != NULL) {
+        grenades::Track(penS, grenades::K_SATCHEL, Forward(pen) * (274.0f * Unit()) + pmen->en_vCurrentTranslationAbsolute, -1.0f);
+        if (piReserve != NULL) (*piReserve)--;
+        gs.tmNext = tmNow + 1.0f;
+        Anim(pw, "Fire");
+        if (!_bRadio) View(3); // SATCHEL_DROP
+        Log("throw", g, grenades::Satchels(), piReserve != NULL ? *piReserve : -1);
+      }
     }
     } break;
   case G_CROSSBOW:
@@ -973,9 +982,9 @@ void Reset(void) {
   _iLastSam = -1;
   _bCharging = FALSE;
   _bPinPulled = FALSE;
+  _tmRedraw = 0;
   _bOldFire = _bOldAlt = FALSE;
   _bEgonOn = FALSE;
-  _ctSatchels = 0;
   _gView = G_NONE;
   _bHolstered = _bRadio = FALSE;
   viewmodel::SetModel(NULL, 0, 0);
@@ -991,8 +1000,8 @@ void Draw(CDrawPort *pdp, CEntity *pen) {
   const GunState &gs = _aGuns[g];
   if (g == G_GAUSS && _bCharging) {
     _snprintf(str, sizeof(str), "%s %3.0f%%", _astrGun[g], Min((_pTimer->CurrentTick() - _tmChargeStart) / 4.0f, 1.0f) * 100.0f);
-  } else if (g == G_SATCHEL && _ctSatchels > 0) {
-    _snprintf(str, sizeof(str), "%s %d out", _astrGun[g], _ctSatchels);
+  } else if (g == G_SATCHEL && grenades::Satchels() > 0) {
+    _snprintf(str, sizeof(str), "%s %d out", _astrGun[g], grenades::Satchels());
   } else if (_aiClip[g] > 0) {
     _snprintf(str, sizeof(str), "%s %d%s", _astrGun[g], gs.iClip, gs.tmReloaded > 0 ? " reloading" : "");
   } else {
@@ -1021,7 +1030,7 @@ CTString Status(CEntity *pen) {
   str.PrintF("weapons %s; in hand Sam's %d = %s, clip %d, reserve %d%s%s; %d satchels out; %u shots (last %.0f damage, %s); sounds: %u Half-Life's, %u Sam's",
     !_bReady ? "unavailable" : hl_bWeapons ? "Half-Life's" : "Sam's",
     iSam, _astrGun[g], _aGuns[g].iClip, piReserve != NULL ? *piReserve : -1, _bCharging ? ", charging" : "",
-    _bEgonOn ? ", beam on" : "", _ctSatchels, _ctShots,
+    _bEgonOn ? ", beam on" : "", grenades::Satchels(), _ctShots,
     _fLastDamage, _strLast, _ctHLSounds, _ctSamSounds);
   str += strMenu;
   return str;

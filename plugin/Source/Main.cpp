@@ -14,6 +14,7 @@
 #include "Hud.h"
 #include "PlayerSounds.h"
 #include "Flashlight.h"
+#include "Grenades.h"
 #include "HlMove.h"
 #include "Rules.h"
 #include "Run.h"
@@ -45,6 +46,7 @@ static void HL_Status(SHELL_FUNC_ARGS) {
   CPrintF("[SeriousHL] %s\n", hud::Status().str_String);
   CPrintF("[SeriousHL] %s\n", playersounds::Status().str_String);
   CPrintF("[SeriousHL] %s\n", flashlight::Status().str_String);
+  CPrintF("[SeriousHL] %s\n", grenades::Status().str_String);
   CEntity *pen = player::Local();
   const FLOAT *pfArmor = pen != NULL ? (FLOAT *)player::Prop(pen, player::PROP_ARMOR) : NULL;
   if (pen != NULL) CPrintF("[SeriousHL] health %.1f, armour %.1f\n", ((CLiveEntity *)pen)->en_fHealth, pfArmor != NULL ? *pfArmor : 0.0f);
@@ -540,6 +542,7 @@ static void HL_OnStep(void) {
 #ifndef SERIOUSHL_RUN
   TestTick(pen);
   flashlight::Tick(pen);
+  grenades::Tick();
 #endif
   movement::Track(pen);
 };
@@ -573,6 +576,7 @@ static void HL_OnWorldLoad(CWorld *pwo, const CTFileName &fnmWorld) {
   weapons::Reset();
   playersounds::Release();
   flashlight::Release();
+  grenades::Release();
 #endif
 };
 
@@ -582,6 +586,7 @@ static void HL_OnGameStop(void) {
   weapons::Reset();
   playersounds::Release();
   flashlight::Release();
+  grenades::Release();
 #endif
 };
 
