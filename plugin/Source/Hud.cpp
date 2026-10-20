@@ -273,6 +273,61 @@ static void DrawAmmo(PIX pixW, PIX pixH, const std::map<std::string, Rect> &gun,
   }
 };
 
+// --- the weapon menu (ammo.cpp DrawWList): the buckets 1-5 along the top, the open one's guns under it (the one picked
+// bright in its frame, red with no ammo), the others' as small boxes
+static void DrawMenu(const weapons::Menu &menu) {
+  if (!menu.bOpen) return;
+  const Rect *aprBucket[5];
+  char strName[16];
+  for (INDEX i = 0; i < 5; i++) {
+    sprintf(strName, "bucket%d", i + 1);
+    aprBucket[i] = Find(_mapHud, strName);
+  }
+  if (aprBucket[0] == NULL) return;
+  const Rect *prSelection = Find(_mapHud, "selection");
+  const FLOAT k = _iRes / 640.0f * _fScale; // (Half-Life's 10 pixels at 640)
+  const FLOAT fBW = aprBucket[0]->w * _fScale, fBH = aprBucket[0]->h * _fScale;
+  // the width of the open slot: its first gun's picture
+  FLOAT fOpenWidth = fBW;
+  for (INDEX g = 0; g < menu.ctGuns; g++) {
+    if (menu.aGuns[g].iSlot != menu.iSlot) continue;
+    const Rect *pr = Find(Gun(menu.aGuns[g].strFile), "weapon_s");
+    if (pr != NULL) fOpenWidth = pr->w * _fScale;
+    break;
+  }
+  FLOAT x = 10 * k, y = 10 * k;
+  for (INDEX i = 0; i < 5; i++) {
+    if (aprBucket[i] != NULL) DrawAdditive(aprBucket[i], x, y, 255, 160, 0);
+    x += (i == menu.iSlot ? fOpenWidth : fBW) + 5 * k;
+  }
+  x = 10 * k;
+  for (INDEX i = 0; i < 5; i++) {
+    y = fBH + 10 * k;
+    for (INDEX g = 0; g < menu.ctGuns; g++) {
+      const weapons::MenuGun &mg = menu.aGuns[g];
+      if (mg.iSlot != i) continue;
+      if (i == menu.iSlot) {
+        const std::map<std::string, Rect> &gun = Gun(mg.strFile);
+        const Rect *prActive = Find(gun, "weapon_s"), *prInactive = Find(gun, "weapon");
+        if (mg.bSelected) {
+          DrawAdditive(prActive, x, y, 255, 160, 0);
+          DrawAdditive(prSelection, x, y, 255, 160, 0);
+        } else if (mg.bAmmo) {
+          DrawAdditive(prInactive, x, y, 255 * 192 / 255, 160 * 192 / 255, 0);
+        } else {
+          DrawAdditive(prInactive, x, y, 255 * 128 / 255, 16 * 128 / 255, 16 * 128 / 255);
+        }
+        y += (prActive != NULL ? prActive->h * _fScale : fBH) + 5 * k;
+      } else {
+        if (mg.bAmmo) FillRGBA(x, y, fBW, fBH, 255, 160, 0, 128);
+        else FillRGBA(x, y, fBW, fBH, 255, 16, 16, 96);
+        y += fBH + 5 * k;
+      }
+    }
+    x += (i == menu.iSlot ? fOpenWidth : fBW) + 5 * k;
+  }
+};
+
 // --- Sam's status line off while this is on; his crosshair (CPlayerWeapons::RenderCrosshair) skipped
 static CSymbolPtr _symShowInfo;
 static BOOL _bSamHidden = FALSE;
@@ -366,6 +421,10 @@ void Draw(CDrawPort *pdp, CEntity *pen) {
       DrawAdditive(prCross, pixW / 2 - prCross->w * _fScale / 2, pixH / 2 - prCross->h * _fScale / 2, 255, 255, 255);
     }
   }
+
+  weapons::Menu menu;
+  weapons::GetMenu(pen, menu);
+  DrawMenu(menu);
 
   xglMatrixMode(GL_PROJECTION);
   xglPopMatrix();

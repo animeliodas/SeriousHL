@@ -181,3 +181,8 @@ Route: rules rewritten in the host (pattern "guest's rules headless"), on the Se
     play on the plugin's CSoundObjects with the player as owner (SetOwner; let go of on a level change).
 - 2026-10-20: Half-Life's player sounds (steps by surface and pace, jump, landing, fall pain, swim, pain). Steps heard:
   peak 0.054 over 0.008 quiet (Sam's 0.061).
+45. Weapon selection in Player.es is by the buttons' edge (ulNewButtons = now & ~before, before = the last applied
+    action's): to ask Sam for a weapon by his slot key again (the other of a pair), a tick without it between. Half-Life's
+    hud_fastswitch takes a gun at once only when it's the only one in its slot (SelectSlot); its menu doesn't time out.
+- 2026-10-20: Half-Life's weapon menu (slots 1-5, the wheel, the flip key as lastinv, fire takes; hl_bSlots,
+  hl_bFastSwitch) drawn as ammo.cpp's DrawWList. `test_weapons.py slots` PASS TFE.

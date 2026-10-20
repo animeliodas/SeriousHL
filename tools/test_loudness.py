@@ -47,7 +47,7 @@ def main() -> None:
     if not game_pid(game.folder):
         raise SystemExit("the game isn't running")
     guns = test_weapons.Guns(game, kind)
-    game.run("cht_bGiveAll=1;", f"hl_bWeapons={0 if a.sam else 1};")
+    game.run("cht_bGiveAll=1;", f"hl_bWeapons={0 if a.sam else 1};", "hl_bSlots=0;")
     for gun in a.guns.split(","):
         if not guns.take(gun):
             print(f"{gun}: not in hand")

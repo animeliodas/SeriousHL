@@ -26,6 +26,8 @@ namespace weapons {
 extern INDEX hl_bWeapons;     // 1: Half-Life's weapons on Sam's guns; 0: Sam's
 extern INDEX hl_iAltFireKey;  // the second fire's key (Windows virtual-key code; right mouse button)
 extern INDEX hl_iTestAlt;     // tests: the second fire held for this many actions
+extern INDEX hl_bSlots;       // 1: Half-Life's weapon menu on the slot keys 1-5, the wheel and the flip key; 0: Sam's
+extern INDEX hl_bFastSwitch;  // hud_fastswitch: a slot key takes its slot's only gun at once; the wheel at once
 
 // Plugin startup: find Sam's weapon functions and install the action filter. FALSE: Sam's weapons stay.
 BOOL Init(void);
@@ -41,6 +43,10 @@ void FreeSounds(void);
 // For the HUD: the gun in hand's weapon_*.txt (NULL: none of Half-Life's), its magazine (-1: none), its reserve and
 // second ammo (-1: none, or endless).
 const char *HudGun(CEntity *penPlayer, INDEX &iClip, INDEX &iAmmo, INDEX &iAmmo2);
+// Half-Life's weapon menu for the HUD (ammo.cpp DrawWList): open, its slot, the guns he has in each slot.
+struct MenuGun { const char *strFile; INDEX iSlot, iPos; BOOL bAmmo, bSelected; };
+struct Menu { BOOL bOpen; INDEX iSlot; INDEX ctGuns; MenuGun aGuns[16]; };
+void GetMenu(CEntity *penPlayer, Menu &menu);
 
 }; // namespace
 

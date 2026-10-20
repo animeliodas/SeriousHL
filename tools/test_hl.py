@@ -307,7 +307,7 @@ def main() -> None:
     for name in a.only.split(","):
         try:
             start_level(game, level)
-            game.run("cht_bGod=1;", "hl_bEnable=1;", "hl_bAutoJump=1;", "hl_bBhopCap=0;")
+            game.run("cht_bGod=1;", "hl_bEnable=1;", "hl_bAutoJump=1;", "hl_bBhopCap=0;", "hl_bSlots=0;")
             settle(game)
             checks[name](game, results)
         except Hung as e:

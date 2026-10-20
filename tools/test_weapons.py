@@ -15,7 +15,9 @@ at a target, its health):
   hev      Half-Life's armour: 80% of a hit on it, a point of it stops two, none for falls; Sam's back with hl_bHevArmor 0;
   egon     the egon (on the minigun) held 0.5 s: 14 damage and a cell every 0.1 s, the beam off on letting go;
   satchel  a satchel (on the cannon) waits past Sam's 3 s fuse, then the first fire sets it off: damage at the target;
-  crossbow (TSE, on the sniper rifle) one bolt: 50.
+  crossbow (TSE, on the sniper rifle) one bolt: 50;
+  slots    Half-Life's weapon menu: 3 opens it on the MP5, 3 again the shotgun, fire takes it; the flip key back; with
+           hl_bFastSwitch 1, 1 takes the crowbar at once (its slot's only one), 2 still opens the menu (two in it).
 Prints PASS/FAIL per check.
 """
 import argparse
@@ -26,7 +28,7 @@ import time
 import test_hl
 import test_loudness
 
-ALL = ("damage", "crowbar", "rate", "clip", "gauss", "sounds", "hev", "egon", "satchel", "crossbow")
+ALL = ("damage", "crowbar", "rate", "clip", "gauss", "sounds", "hev", "egon", "satchel", "crossbow", "slots")
 UNIT = test_hl.UNIT
 # Sam's WeaponType and the key slots: TFE / TSE
 SAM = {"tfe": {"knife": (1, 1), "colt": (2, 2), "doublecolt": (3, 2), "shotgun": (4, 3), "tommygun": (6, 4), "laser": (14, 8),
@@ -233,6 +235,42 @@ def check_crossbow(game, guns, results):
     results.append(("crossbow: a bolt takes 50, the clip 5", lost == 50 and st.get("clip") == 4, f"lost {lost}, clip {st.get('clip')}"))
 
 
+def check_slots(game, guns, results):
+    game.run("hl_bSlots=1;", "hl_bFastSwitch=0;")
+    picks = []
+
+    def press(cmd: str, wait: float = 0.4) -> None:
+        game.run(cmd)
+        time.sleep(wait)
+
+    def hand() -> int:
+        time.sleep(3.0)  # (Sam's put away and draw)
+        return guns.in_hand()
+
+    s = guns.sam
+    start = guns.in_hand()
+    press("hl_iTestSelect=3;")
+    out = game.run("hl_Status();", want="weapons")
+    press("hl_iTestSelect=3;")
+    press("hl_iTestFire=1;")
+    picks.append(("3, 3, fire: the shotgun", hand() in (s["shotgun"][0], 5)))
+    press("hl_iTestSelect=0;")
+    game.run("hl_iTestSelect=0;")
+    # (the flip key: Sam's "flip weapon" bit, 1 << 4, sent for one action)
+    press('hl_TestButtons("16");')
+    picks.append(("flip: back to the one before", hand() == start))
+    game.run("hl_bFastSwitch=1;")
+    press("hl_iTestSelect=1;")
+    picks.append(("fast 1: the crowbar at once", hand() == s["knife"][0]))
+    press("hl_iTestSelect=2;")
+    picks.append(("fast 2: still the menu (no switch)", hand() == s["knife"][0]))
+    press("hl_iTestFire=1;")
+    picks.append(("... fire takes the Glock", hand() == s["doublecolt"][0]))
+    game.run("hl_bFastSwitch=0;", "hl_bSlots=0;")
+    results.append(("slots: Half-Life's weapon menu on Sam's guns", all(ok for _, ok in picks),
+                    ", ".join(f"{name} {'yes' if ok else 'NO'}" for name, ok in picks)))
+
+
 def hit(game, args: str):
     """health before, after, armour before, after, the difficulty's damage strength"""
     out = game.run(f'hl_TestDamage("{args}");', want="test damage")
@@ -282,12 +320,12 @@ def main() -> None:
         test_hl.launch(game)
     checks = {"damage": check_damage, "crowbar": check_crowbar, "rate": check_rate, "clip": check_clip, "gauss": check_gauss,
               "sounds": check_sounds, "hev": check_hev, "egon": check_egon, "satchel": check_satchel,
-              "crossbow": check_crossbow}
+              "crossbow": check_crossbow, "slots": check_slots}
     results = []
     for name in a.only.split(","):
         try:
             test_hl.start_level(game, level)
-            game.run("cht_bGod=1;", "cht_bInvisible=1;", "cht_bGiveAll=1;", "hl_bWeapons=1;")
+            game.run("cht_bGod=1;", "cht_bInvisible=1;", "cht_bGiveAll=1;", "hl_bWeapons=1;", "hl_bSlots=0;")
             time.sleep(1.0)
             checks[name](game, Guns(game, kind), results)
         except test_hl.Hung as e:

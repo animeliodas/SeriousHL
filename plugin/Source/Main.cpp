@@ -71,6 +71,7 @@ static INDEX hl_bTestDuck = FALSE;
 static FLOAT hl_fTestTurn = 0.0f;
 static INDEX hl_iTestFire = 0;
 static INDEX hl_iTestSelect = 0;
+static ULONG _ulTestButtons = 0; // buttons for the next action (hl_TestButtons)
 static FLOAT hl_fTestPitch = 0.0f;   // the view's pitch held there (degrees, down negative) while not 0 // a weapon to select (Player.es WeaponType: 8 rocket launcher)
 
 static const ULONG PLACT_FIRE = 1UL << 0; // Player.es
@@ -409,6 +410,11 @@ static void HL_TestDamage(SHELL_FUNC_ARGS) {
   hev::TestDamage(player::Local(), NEXT_ARG(CTString *)->str_String);
 };
 
+static void HL_TestButtons(SHELL_FUNC_ARGS) {
+  BEGIN_SHELL_FUNC;
+  _ulTestButtons = (ULONG)strtoul(NEXT_ARG(CTString *)->str_String, NULL, 0);
+};
+
 static void HL_Trace(SHELL_FUNC_ARGS) {
   BEGIN_SHELL_FUNC;
   hl::TraceTicks(NEXT_ARG(INDEX));
@@ -443,6 +449,10 @@ static void TestAction(CPlayerAction &pa, BOOL bFresh) {
     pa.pa_ulButtons |= PLACT_FIRE;
     _bFireSent = TRUE;
   }
+  if (bFresh && _ulTestButtons != 0) {
+    pa.pa_ulButtons |= _ulTestButtons;
+    _ulTestButtons = 0;
+  }
   if (bFresh && hl_iTestSelect > 0) {
     // PLACT_SELECT_WEAPON_SHIFT: 9 in TFE's Player.es, 14 in TSE's
 #if SE1_GAME == SS_TFE
@@ -464,12 +474,15 @@ static void DeclareUsual(void) {
   ClassicsPlugins()->RegisterMethod(TRUE, "void", "hl_Probe", "void", &HL_Probe);
   ClassicsPlugins()->RegisterMethod(TRUE, "void", "hl_Aim", "CTString", &HL_Aim);
   ClassicsPlugins()->RegisterMethod(TRUE, "void", "hl_TestDamage", "CTString", &HL_TestDamage);
+  ClassicsPlugins()->RegisterMethod(TRUE, "void", "hl_TestButtons", "CTString", &HL_TestButtons);
   ClassicsPlugins()->RegisterMethod(TRUE, "void", "hl_GoWater", "CTString", &HL_GoWater);
   ClassicsPlugins()->RegisterMethod(TRUE, "void", "hl_WaterEdge", "CTString", &HL_WaterEdge);
   _pShell->DeclareSymbol("user INDEX hl_bEdgeDebug;", &_bEdgeDebug);
   ClassicsPlugins()->RegisterMethod(TRUE, "void", "hl_WaterProbe", "void", &HL_WaterProbe);
   _pShell->DeclareSymbol("persistent user INDEX hl_bWeapons;", &weapons::hl_bWeapons);
   _pShell->DeclareSymbol("persistent user INDEX hl_iAltFireKey;", &weapons::hl_iAltFireKey);
+  _pShell->DeclareSymbol("persistent user INDEX hl_bSlots;", &weapons::hl_bSlots);
+  _pShell->DeclareSymbol("persistent user INDEX hl_bFastSwitch;", &weapons::hl_bFastSwitch);
   _pShell->DeclareSymbol("persistent user INDEX hl_bHevArmor;", &hev::hl_bHevArmor);
   _pShell->DeclareSymbol("persistent user INDEX hl_bViewModels;", &viewmodel::hl_bViewModels);
   _pShell->DeclareSymbol("persistent user FLOAT hl_fViewModelFov;", &viewmodel::hl_fViewModelFov);

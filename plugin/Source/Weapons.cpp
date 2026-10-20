@@ -19,6 +19,8 @@ namespace weapons {
 
 INDEX hl_bWeapons = TRUE;
 INDEX hl_iAltFireKey = VK_RBUTTON;
+INDEX hl_bSlots = TRUE;
+INDEX hl_bFastSwitch = FALSE;
 
 // --- Player.es (class 401) and PlayerWeapons.es (class 402), the same in TFE and TSE for these
 static const ULONG PROP_WEAPONS = (401UL << 8) | 16;   // m_penWeapons
@@ -48,6 +50,13 @@ enum { SND_KNIFE_HIGH = 24, SND_KNIFE_LONG = 25, SND_COLT_FIRE = 37, SND_COLT_RE
 static const INDEX FLARE_ADD = 2;
 // Player.es buttons
 static const ULONG PLACT_FIRE = 1UL << 0, PLACT_RELOAD = 1UL << 1, PLACT_USE = 1UL << 5, PLACT_COMPUTER = 1UL << 6;
+static const ULONG PLACT_WEAPON_NEXT = 1UL << 2, PLACT_WEAPON_PREV = 1UL << 3, PLACT_WEAPON_FLIP = 1UL << 4;
+#if SE1_GAME == SS_TFE
+static const INDEX PLACT_SELECT_SHIFT = 9;
+#else
+static const INDEX PLACT_SELECT_SHIFT = 14;
+#endif
+static const ULONG PW_AVAILABLE = (402UL << 8) | 11; // m_iAvailableWeapons: a bit a weapon (1 << (type - 1))
 // Sam's weapons (WeaponType)
 #if SE1_GAME == SS_TFE
 enum { W_KNIFE = 1, W_COLT = 2, W_DOUBLECOLT = 3, W_SINGLESHOTGUN = 4, W_DOUBLESHOTGUN = 5, W_TOMMYGUN = 6,
@@ -356,6 +365,215 @@ static void Detonate(void) {
   _ctSatchels = 0;
 };
 
+static const char *_astrHudFile[G_COUNT] = { NULL, "weapon_crowbar", "weapon_357", "weapon_9mmhandgun", "weapon_shotgun",
+  "weapon_9mmar", "weapon_rpg", "weapon_handgrenade", "weapon_gauss", "weapon_egon", "weapon_satchel", "weapon_crossbow" };
+
+// --- Half-Life's weapon menu (hud ammo.cpp: buckets 1-5, positions in them), on Sam's guns: the slot keys open it,
+// press again for the next in the slot, fire takes the one picked (or at once with hl_bFastSwitch); the wheel goes
+// through all of them, the flip key back to the last one. Sam is then asked for the gun's host by his own slot keys,
+// a key again a tick later if he took the other of the pair. Keys 6-9 stay Sam's.
+struct HLSlot { Gun g; INDEX iSlot, iPos; };
+static const HLSlot _aSlots[] = {
+  { G_CROWBAR, 0, 0 }, { G_GLOCK, 1, 0 }, { G_PYTHON, 1, 1 }, { G_MP5, 2, 0 }, { G_SHOTGUN, 2, 1 }, { G_CROSSBOW, 2, 2 },
+  { G_RPG, 3, 0 }, { G_GAUSS, 3, 1 }, { G_EGON, 3, 2 }, { G_GRENADE, 4, 0 }, { G_SATCHEL, 4, 1 },
+};
+static const INDEX CT_SLOTS = sizeof(_aSlots) / sizeof(_aSlots[0]);
+// the hosts (the first he has), and Sam's slot key for each of Sam's weapons
+static INDEX Host(CEntity *pw, Gun g) {
+  INDEX aiHosts[2] = { -1, -1 };
+  switch (g) {
+    case G_CROWBAR: aiHosts[0] = W_KNIFE; aiHosts[1] = W_CHAINSAW; break;
+    case G_PYTHON: aiHosts[0] = W_COLT; break;
+    case G_GLOCK: aiHosts[0] = W_DOUBLECOLT; break;
+    case G_SHOTGUN: aiHosts[0] = W_DOUBLESHOTGUN; aiHosts[1] = W_SINGLESHOTGUN; break;
+    case G_MP5: aiHosts[0] = W_TOMMYGUN; break;
+    case G_RPG: aiHosts[0] = W_ROCKETLAUNCHER; break;
+    case G_GRENADE: aiHosts[0] = W_GRENADELAUNCHER; break;
+    case G_GAUSS: aiHosts[0] = W_LASER; break;
+    case G_EGON: aiHosts[0] = W_MINIGUN; break;
+    case G_SATCHEL: aiHosts[0] = W_IRONCANNON; break;
+    case G_CROSSBOW: aiHosts[0] = W_SNIPER; break;
+  }
+  const INDEX iHave = player::PropIndex(pw, PW_AVAILABLE, 0);
+  for (INDEX i = 0; i < 2; i++) {
+    if (aiHosts[i] > 0 && (iHave & (1 << (aiHosts[i] - 1)))) return aiHosts[i];
+  }
+  return -1;
+};
+
+static INDEX SamKey(INDEX iSam) {
+#if SE1_GAME == SS_TFE
+  switch (iSam) {
+    case W_KNIFE: return 1; case W_COLT: case W_DOUBLECOLT: return 2; case W_SINGLESHOTGUN: case W_DOUBLESHOTGUN: return 3;
+    case W_TOMMYGUN: case W_MINIGUN: return 4; case W_ROCKETLAUNCHER: return 5; case W_GRENADELAUNCHER: return 6;
+    case W_LASER: return 8; case W_IRONCANNON: return 9;
+  }
+#else
+  switch (iSam) {
+    case W_KNIFE: case W_CHAINSAW: return 1; case W_COLT: case W_DOUBLECOLT: return 2;
+    case W_SINGLESHOTGUN: case W_DOUBLESHOTGUN: return 3; case W_TOMMYGUN: case W_MINIGUN: return 4;
+    case W_ROCKETLAUNCHER: case W_GRENADELAUNCHER: return 5; case W_SNIPER: return 6; case W_LASER: return 7;
+    case W_IRONCANNON: return 8;
+  }
+#endif
+  return 0;
+};
+
+static BOOL HasAmmo(CEntity *pw, Gun g) {
+  const INDEX *piReserve = Reserve(pw, g);
+  return piReserve == NULL || *piReserve > 0 || (_aiClip[g] > 0 && _aGuns[g].iClip > 0);
+};
+
+static BOOL _bMenu = FALSE;
+static INDEX _iMenu = -1;      // the menu's pick: an index into _aSlots
+static TIME _tmMenu = 0;
+static INDEX _iOldKey = 0;
+static ULONG _ulOldMenuButtons = 0;
+static INDEX _iTargetSam = -1, _ctTries = 0;
+static BOOL _bAskedLastTick = FALSE;
+static Gun _gLast = G_NONE, _gHolding = G_NONE;
+static ULONG _ctPicks = 0;
+
+static void MenuSound(CEntity *pen, CEntity *pw, const char *strSound) {
+  Sound(pen, pw, strSound, -1, TRUE);
+};
+
+// the next one he has (from index i, in that direction; only in one slot if iSlot >= 0)
+static INDEX NextOwned(CEntity *pw, INDEX i, INDEX iDir, INDEX iSlot) {
+  for (INDEX n = 1; n <= CT_SLOTS; n++) {
+    const INDEX j = ((i + iDir * n) % CT_SLOTS + CT_SLOTS) % CT_SLOTS;
+    if (iSlot >= 0 && _aSlots[j].iSlot != iSlot) continue;
+    if (Host(pw, _aSlots[j].g) > 0) return j;
+  }
+  return -1;
+};
+
+static INDEX IndexOf(Gun g) {
+  for (INDEX i = 0; i < CT_SLOTS; i++) if (_aSlots[i].g == g) return i;
+  return -1;
+};
+
+static void Take(CEntity *pen, CEntity *pw, INDEX iSlotIndex) {
+  _bMenu = FALSE;
+  if (iSlotIndex < 0) return;
+  const Gun g = _aSlots[iSlotIndex].g;
+  const INDEX iSam = Host(pw, g);
+  if (iSam <= 0) return;
+  if (!HasAmmo(pw, g)) {
+    MenuSound(pen, pw, "common\\wpn_denyselect.wav");
+    return;
+  }
+  MenuSound(pen, pw, "common\\wpn_select.wav");
+  if (_gHolding != g) _gLast = _gHolding;
+  _iTargetSam = iSam;
+  _ctTries = 0;
+  _ctPicks++;
+};
+
+// TRUE: fire went to the menu (taking the gun)
+static BOOL Select(CEntity *pen, CEntity *pw, CPlayerAction &pa, Gun gInHand) {
+  _gHolding = gInHand;
+  if (!hl_bSlots) {
+    _bMenu = FALSE;
+    _iTargetSam = -1;
+    return FALSE;
+  }
+  const ULONG ulKeyMask = 0x1FUL << PLACT_SELECT_SHIFT;
+  const INDEX iKey = (INDEX)((pa.pa_ulButtons & ulKeyMask) >> PLACT_SELECT_SHIFT);
+  const ULONG ulMenuButtons = pa.pa_ulButtons & (PLACT_WEAPON_NEXT | PLACT_WEAPON_PREV | PLACT_WEAPON_FLIP | PLACT_FIRE);
+  const ULONG ulPressed = ulMenuButtons & ~_ulOldMenuButtons;
+  _ulOldMenuButtons = ulMenuButtons;
+  const BOOL bKeyPressed = iKey != 0 && iKey != _iOldKey;
+  _iOldKey = iKey;
+  // Sam's own selection out of it (the keys 6-9 stay his)
+  if (iKey <= 5) pa.pa_ulButtons &= ~ulKeyMask;
+  pa.pa_ulButtons &= ~(PLACT_WEAPON_NEXT | PLACT_WEAPON_PREV | PLACT_WEAPON_FLIP);
+  const TIME tmNow = _pTimer->CurrentTick();
+
+  if (bKeyPressed && iKey <= 5) {
+    const INDEX iSlot = iKey - 1;
+    const INDEX iFrom = (_bMenu && _iMenu >= 0 && _aSlots[_iMenu].iSlot == iSlot) ? _iMenu : -1;
+    // (the first in the slot, or the next after the one picked)
+    INDEX iPick = -1;
+    if (iFrom >= 0) {
+      iPick = NextOwned(pw, iFrom, 1, iSlot);
+    } else {
+      for (INDEX i = 0; i < CT_SLOTS && iPick < 0; i++) if (_aSlots[i].iSlot == iSlot && Host(pw, _aSlots[i].g) > 0) iPick = i;
+    }
+    if (iPick < 0) {
+      MenuSound(pen, pw, "common\\wpn_denyselect.wav");
+      _bMenu = FALSE;
+    } else if (hl_bFastSwitch && !_bMenu && NextOwned(pw, iPick, 1, iSlot) == iPick) {
+      // (fast: at once - only when it's the slot's only one, as Half-Life's SelectSlot)
+      Take(pen, pw, iPick);
+    } else {
+      MenuSound(pen, pw, _bMenu ? "common\\wpn_moveselect.wav" : "common\\wpn_hudon.wav");
+      _bMenu = TRUE;
+      _iMenu = iPick;
+      _tmMenu = tmNow;
+    }
+  } else if (bKeyPressed) {
+    _bMenu = FALSE;
+  }
+  if (ulPressed & (PLACT_WEAPON_NEXT | PLACT_WEAPON_PREV)) {
+    const INDEX iDir = (ulPressed & PLACT_WEAPON_NEXT) ? 1 : -1;
+    const INDEX iFrom = _bMenu && _iMenu >= 0 ? _iMenu : IndexOf(gInHand);
+    const INDEX iPick = NextOwned(pw, iFrom >= 0 ? iFrom : (iDir > 0 ? CT_SLOTS - 1 : 0), iDir, -1);
+    if (iPick >= 0) {
+      if (hl_bFastSwitch) {
+        Take(pen, pw, iPick);
+      } else {
+        MenuSound(pen, pw, "common\\wpn_moveselect.wav");
+        _bMenu = TRUE;
+        _iMenu = iPick;
+        _tmMenu = tmNow;
+      }
+    }
+  }
+  if (ulPressed & PLACT_WEAPON_FLIP) Take(pen, pw, IndexOf(_gLast));
+
+  BOOL bFireTaken = FALSE;
+  if (_bMenu && (ulPressed & PLACT_FIRE)) {
+    Take(pen, pw, _iMenu);
+    bFireTaken = TRUE;
+  }
+  // a fire held since taking a gun from the menu doesn't shoot it at once
+  if (bFireTaken) pa.pa_ulButtons &= ~PLACT_FIRE;
+
+  // Sam asked for the host: his slot key, again a tick later if he took the other of the pair
+  if (_iTargetSam > 0) {
+    const INDEX iWanted = player::PropIndex(pw, PW_WANTED, 0);
+    if (iWanted == _iTargetSam || _ctTries >= 6) {
+      _iTargetSam = -1;
+    } else if (_bAskedLastTick) {
+      _bAskedLastTick = FALSE;
+    } else {
+      const INDEX iSamKey = SamKey(_iTargetSam);
+      if (iSamKey > 0) pa.pa_ulButtons = (pa.pa_ulButtons & ~ulKeyMask) | ((ULONG)iSamKey << PLACT_SELECT_SHIFT);
+      _bAskedLastTick = TRUE;
+      _ctTries++;
+    }
+  }
+  return bFireTaken;
+};
+
+void GetMenu(CEntity *pen, Menu &menu) {
+  memset(&menu, 0, sizeof(menu));
+  CEntity *pw = pen != NULL ? player::PropEntity(pen, PROP_WEAPONS) : NULL;
+  if (pw == NULL || !hl_bWeapons || !hl_bSlots) return;
+  menu.bOpen = _bMenu;
+  menu.iSlot = _bMenu && _iMenu >= 0 ? _aSlots[_iMenu].iSlot : -1;
+  for (INDEX i = 0; i < CT_SLOTS && menu.ctGuns < 16; i++) {
+    if (Host(pw, _aSlots[i].g) <= 0) continue;
+    MenuGun &mg = menu.aGuns[menu.ctGuns++];
+    mg.strFile = _astrHudFile[_aSlots[i].g];
+    mg.iSlot = _aSlots[i].iSlot;
+    mg.iPos = _aSlots[i].iPos;
+    mg.bAmmo = HasAmmo(pw, _aSlots[i].g);
+    mg.bSelected = _bMenu && i == _iMenu;
+  }
+};
+
 // --- every action of the tracked player, before Player.es applies it
 static void Filter(CEntity *pen, CPlayerAction &pa);
 
@@ -420,6 +638,8 @@ static void Filter(CEntity *pen, CPlayerAction &pa) {
   const INDEX iSam = player::PropIndex(pw, PW_CURRENT, 0);
   const INDEX iWanted = player::PropIndex(pw, PW_WANTED, 0);
   const Gun g = GunFor(iSam);
+  // Half-Life's weapon menu first (fire may go to it)
+  if (Select(pen, pw, pa, g)) pa.pa_ulButtons &= ~PLACT_FIRE;
   const BOOL bAlt = AltDown();
   if (hl_iTestAlt > 0) hl_iTestAlt--;
   if (g == G_NONE) {
@@ -795,16 +1015,17 @@ CTString Status(CEntity *pen) {
   const INDEX iSam = pw != NULL ? player::PropIndex(pw, PW_CURRENT, 0) : -1;
   const Gun g = GunFor(iSam);
   const INDEX *piReserve = pw != NULL ? Reserve(pw, g) : NULL;
+  CTString strMenu;
+  strMenu.PrintF("; menu %s (pick %s), asking Sam for %d (%d tries), last %s, %u picks", _bMenu ? "open" : "closed",
+    _iMenu >= 0 && _iMenu < CT_SLOTS ? _astrGun[_aSlots[_iMenu].g] : "-", _iTargetSam, _ctTries, _astrGun[_gLast], _ctPicks);
   str.PrintF("weapons %s; in hand Sam's %d = %s, clip %d, reserve %d%s%s; %d satchels out; %u shots (last %.0f damage, %s); sounds: %u Half-Life's, %u Sam's",
     !_bReady ? "unavailable" : hl_bWeapons ? "Half-Life's" : "Sam's",
     iSam, _astrGun[g], _aGuns[g].iClip, piReserve != NULL ? *piReserve : -1, _bCharging ? ", charging" : "",
     _bEgonOn ? ", beam on" : "", _ctSatchels, _ctShots,
     _fLastDamage, _strLast, _ctHLSounds, _ctSamSounds);
+  str += strMenu;
   return str;
 };
-
-static const char *_astrHudFile[G_COUNT] = { NULL, "weapon_crowbar", "weapon_357", "weapon_9mmhandgun", "weapon_shotgun",
-  "weapon_9mmar", "weapon_rpg", "weapon_handgrenade", "weapon_gauss", "weapon_egon", "weapon_satchel", "weapon_crossbow" };
 
 const char *HudGun(CEntity *pen, INDEX &iClip, INDEX &iAmmo, INDEX &iAmmo2) {
   iClip = iAmmo = iAmmo2 = -1;

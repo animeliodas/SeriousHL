@@ -26,7 +26,7 @@ def main() -> None:
     if a.launch:
         test_hl.launch(game)
         test_hl.start_level(game, "LevelsMP/2_1_Ziggurrat" if kind == "tse" else "11_AlleyOfSphinxes")
-    game.run("cht_bGod=1;", "cht_bInvisible=1;", "cht_bGiveAll=1;", "hl_bWeapons=1;")
+    game.run("cht_bGod=1;", "cht_bInvisible=1;", "cht_bGiveAll=1;", "hl_bWeapons=1;", "hl_bSlots=0;")
     guns = test_weapons.Guns(game, kind)
     Path(a.out).parent.mkdir(parents=True, exist_ok=True)
     for gun in a.guns.split(","):
