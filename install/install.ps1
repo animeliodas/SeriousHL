@@ -160,6 +160,9 @@ function Install-HalfLifeAssets([string]$Dir, [string]$Valve) {
     }
   }
   Write-Host "  $n sounds from Half-Life ($Valve) -> $root"
+  # what the HEV suit says (its sentences, said word by word from fvox)
+  $sentences = Join-Path $Valve 'sound\sentences.txt'
+  if (Test-Path -LiteralPath $sentences) { Copy-Item -LiteralPath $sentences -Destination (Join-Path $root 'sentences.txt') -Force }
   # the guns in your hands (view models): copied as they are
   $models = Join-Path $Dir 'Models\SeriousHL'
   New-Item -ItemType Directory -Force -Path $models | Out-Null

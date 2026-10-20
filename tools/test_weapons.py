@@ -21,7 +21,10 @@ at a target, its health):
            and the fire that takes a gun from the menu shoots nothing of the one in hand;
   grenade  the hand grenade (on the grenade launcher), looking level: thrown 0.5 s after the pin at 400 u/s 10 degrees up,
            half gravity - first touches the floor 7-11 m ahead (Half-Life's arc from the eyes: ~9 m); goes off 3 s after the
-           pin with Half-Life's explosion sound, bounces with its.
+           pin with Half-Life's explosion sound, bounces with its;
+  suit     the HEV suit's voice: a 40 point bullet from full health with no armour - blood loss, then the automedic and the
+           morphine (Half-Life's TakeDamage), said word by word, the next 3.5 s after; a fall then says nothing new
+           at once (one sentence at a time).
 Prints PASS/FAIL per check.
 """
 import argparse
@@ -32,7 +35,7 @@ import time
 import test_hl
 import test_loudness
 
-ALL = ("damage", "crowbar", "rate", "clip", "gauss", "sounds", "hev", "egon", "satchel", "crossbow", "slots", "grenade")
+ALL = ("damage", "crowbar", "rate", "clip", "gauss", "sounds", "hev", "egon", "satchel", "crossbow", "slots", "grenade", "suit")
 UNIT = test_hl.UNIT
 # Sam's WeaponType and the key slots: TFE / TSE
 SAM = {"tfe": {"knife": (1, 1), "colt": (2, 2), "doublecolt": (3, 2), "shotgun": (4, 3), "tommygun": (6, 4), "laser": (14, 8),
@@ -350,6 +353,35 @@ def check_hev(game, guns, results):
                                                        for k, r in rows.items())))
 
 
+def check_suit(game, guns, results):
+    game.run("cht_bGod=0;")
+    time.sleep(0.5)
+
+    def voice():
+        st = game.run("hl_Status();", want="HEV voice")
+        m = re.findall(r"HEV voice (\w+); (\d+) sentences known, (\d+) said \(last ([\w-]+), (\d+) words\), (\d+) waiting", st)
+        return m[-1] if m else None
+
+    v0 = voice()
+    r = hit(game, "40 bullet 100 0")
+    time.sleep(1.0)
+    v1 = voice()
+    time.sleep(3.5)
+    v2 = voice()
+    time.sleep(3.5)
+    v3 = voice()
+    game.run("cht_bGod=1;")
+    if None in (v0, v1, v2, v3) or r is None:
+        results.append(("suit: the HEV suit's voice", False, f"no answer: {v0} {v1} {v2} {v3} {r}"))
+        return
+    said = [int(v[2]) - int(v0[2]) for v in (v1, v2, v3)]
+    last = [v[3] for v in (v1, v2, v3)]
+    words = int(v3[4]) - int(v0[4])
+    ok = int(v0[1]) > 90 and said == [1, 2, 3] and last == ["HEV_DMG6", "HEV_MED1", "HEV_HEAL7"] and words >= 15
+    results.append(("suit: blood loss, automedic, morphine after a big bullet hit, 3.5 s apart, word by word", ok,
+                    f"{v0[1]} sentences known; health {r[0]:.0f} -> {r[1]:.0f}; said {said}, last {last}, {words} words"))
+
+
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--game", required=True)
@@ -364,7 +396,7 @@ def main() -> None:
         test_hl.launch(game)
     checks = {"damage": check_damage, "crowbar": check_crowbar, "rate": check_rate, "clip": check_clip, "gauss": check_gauss,
               "sounds": check_sounds, "hev": check_hev, "egon": check_egon, "satchel": check_satchel,
-              "crossbow": check_crossbow, "slots": check_slots, "grenade": check_grenade}
+              "crossbow": check_crossbow, "slots": check_slots, "grenade": check_grenade, "suit": check_suit}
     results = []
     for name in a.only.split(","):
         try:

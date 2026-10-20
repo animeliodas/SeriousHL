@@ -3,6 +3,7 @@
 #include "Hev.h"
 #include "Movement.h"
 #include "Player.h"
+#include "Suit.h"
 #include "SBridge.h"
 
 #include <GameV/SessionProperties.h>
@@ -32,7 +33,15 @@ static FLOAT Strength(CEntity *pen, CEntity *penInflictor) {
 
 class CPlayerHook : public CEntity {
 public:
+  // the hit, then what the suit says of it (the local player's)
   void P_ReceiveDamage(CEntity *penInflictor, enum DamageType dmt, FLOAT fDamage, const FLOAT3D &vHit, const FLOAT3D &vDirection) {
+    const FLOAT fBefore = ((CLiveEntity *)this)->en_fHealth;
+    Hit(penInflictor, dmt, fDamage, vHit, vDirection);
+    const FLOAT fAfter = ((CLiveEntity *)this)->en_fHealth;
+    if (this == movement::Tracked() && fAfter < fBefore) suit::Damage(this, dmt, fDamage * Strength(this, penInflictor), fBefore, fAfter);
+  };
+
+  void Hit(CEntity *penInflictor, enum DamageType dmt, FLOAT fDamage, const FLOAT3D &vHit, const FLOAT3D &vDirection) {
     FLOAT *pfArmor = (FLOAT *)player::Prop(this, player::PROP_ARMOR);
     const FLOAT fStrength = Strength(this, penInflictor);
     if (!hl_bHevArmor || pfArmor == NULL || this != movement::Tracked() || fDamage <= 0.0f || fStrength <= 0.0f) {
