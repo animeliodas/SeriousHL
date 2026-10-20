@@ -31,13 +31,18 @@ struct Thrown {
 static const INDEX MAX_THROWN = 32;
 static Thrown _aThrown[MAX_THROWN];
 static INDEX _ctThrown = 0;
-// sound objects taken in turn (a sound goes on after its grenade is gone)
+// sound objects taken in turn (a sound goes on after its grenade is gone: its owner held, so Sam's mixer - its own
+// thread - never asks a freed entity where it is)
 static CSoundObject *_apsoBounce[8], *_apsoBoom[8];
+static CEntityPointer _apenBounce[8], _apenBoom[8];
 static INDEX _iBounce = 0, _iBoom = 0;
 
-static CSoundObject *Next(CSoundObject **apso, INDEX &i) {
+static CSoundObject *Next(CSoundObject **apso, CEntityPointer *apen, INDEX &i, CEntity *penOwner) {
   i = (i + 1) % 8;
   if (apso[i] == NULL) apso[i] = new CSoundObject;
+  apso[i]->Stop();
+  apso[i]->SetOwner(NULL);
+  apen[i] = penOwner;
   return apso[i];
 };
 static ULONG _ctBounces = 0, _ctExplosions = 0, _ctMade = 0;
@@ -124,7 +129,7 @@ static void Exploded(Thrown &t) {
       if (penEffect == NULL) penEffect = &*iten;
     }
   }
-  if (penEffect != NULL) Play(Next(_apsoBoom, _iBoom), penEffect, "weapons\\explode3.wav|weapons\\explode4.wav|weapons\\explode5.wav", 1.0f, 80.0f);
+  if (penEffect != NULL) Play(Next(_apsoBoom, _apenBoom, _iBoom, penEffect), penEffect, "weapons\\explode3.wav|weapons\\explode4.wav|weapons\\explode5.wav", 1.0f, 80.0f);
   _ctExplosions++;
   CPrintF(SB_TAG " thrown went off at %.2f %.2f %.2f (%.2f s)%s\n", t.vLast(1), t.vLast(2), t.vLast(3), _pTimer->CurrentTick(),
     penEffect != NULL ? ", Half-Life's sound" : "");
@@ -145,7 +150,7 @@ void Tick(void) {
     CSoundObject *psoSam = (CSoundObject *)player::Prop(pen, PJ_SOUND);
     if (psoSam != NULL && psoSam->IsPlaying() && t.kind != K_CONTACT && t.kind != K_TRIPMINE) {
       psoSam->Stop();
-      Play(Next(_apsoBounce, _iBounce), pen, t.kind == K_SATCHEL
+      Play(Next(_apsoBounce, _apenBounce, _iBounce, pen), pen, t.kind == K_SATCHEL
         ? "weapons\\g_bounce1.wav|weapons\\g_bounce2.wav|weapons\\g_bounce3.wav|weapons\\g_bounce4.wav|weapons\\g_bounce5.wav"
         : "weapons\\grenade_hit1.wav|weapons\\grenade_hit2.wav|weapons\\grenade_hit3.wav", 0.8f, 30.0f);
       _ctBounces++;
@@ -174,6 +179,8 @@ void Release(void) {
       apso[j]->Stop();
       apso[j]->SetOwner(NULL);
     }
+    _apenBounce[i] = NULL;
+    _apenBoom[i] = NULL;
   }
   _ctThrown = 0;
 };

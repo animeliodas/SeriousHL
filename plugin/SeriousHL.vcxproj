@@ -13,6 +13,7 @@
   <ItemGroup>
     <ClInclude Include="Source\StdH.h" />
     <ClInclude Include="Source\Bolts.h" />
+    <ClInclude Include="Source\CrashLog.h" />
     <ClInclude Include="Source\Flashlight.h" />
     <ClInclude Include="Source\Gl.h" />
     <ClInclude Include="Source\Grenades.h" />
@@ -35,6 +36,7 @@
     </ClCompile>
     <ClCompile Include="Source\Main.cpp" />
     <ClCompile Include="Source\Bolts.cpp" />
+    <ClCompile Include="Source\CrashLog.cpp" />
     <ClCompile Include="Source\Flashlight.cpp" />
     <ClCompile Include="Source\Gl.cpp" />
     <ClCompile Include="Source\Grenades.cpp" />

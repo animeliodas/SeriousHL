@@ -228,3 +228,12 @@ Route: rules rewritten in the host (pattern "guest's rules headless"), on the Se
     ray on TSE's Ziggurrat, only while a bolt flies (6 m: one tick). InflictDirectDamage(hit, player, DMT_BULLET, 50).
 - 2026-10-20: the crossbow's bolts fly (2000 u/s, crossbow_bolt.mdl, 10 s in a wall, Half-Life's hit sounds); through
   the scope still at once. test_weapons crossbow PASS TSE (the bolt hit the Boneman 0.05 s after it was fired).
+53. A crash the player had in TSE (playing TFE's levels) at a level change, right after SemCraft2's world export: WER
+    says c0000005 in no module (EIP 2B537A4D, heap) - code run through a freed object's table. Not reproduced in 18
+    WorldLink-style level changes (CNetworkLibrary::ChangeLevel from a test hook) with a suit sentence playing on the
+    player. The likeliest cause made impossible anyway: CWorld::Clear (exported, ?Clear@CWorld@@QAEXXZ; a level change's
+    load, a stop, a load all go through it) patched to let go of everything the plugin holds of the world first - the
+    player as its sound objects' owner (carried into the next level as a new entity: Sam's mixer, a timer thread, would
+    ask the old one where it is), the mines, the grenades' sounds' owners (now held by CEntityPointer while they may
+    play). And a crash report of the plugin's own (CrashLog.cpp: the unhandled filter, and a vectored handler for code
+    run in no module), SeriousHL_crash.txt by the game's log: checked with hl_TestCrash (a call to 2B537A4D).

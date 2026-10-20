@@ -26,6 +26,9 @@
 #include "Player.h"
 #include "Physics.h"
 #include "DevHook.h"
+#include "CrashLog.h"
+
+#include <Extras/XGizmo/Objects/StructPtr.h>
 
 #include <stdio.h>
 
@@ -33,6 +36,8 @@
 
 CLASSICSPATCH_DEFINE_PLUGIN(k_EPluginFlagGame, MakeVersion(0, 5, 0),
   "SeriousBridge", "SeriousHL", "Half-Life's movement and weapons for Serious Sam's player.");
+
+static ULONG _ctWorldClears = 0; // (the game's world cleared: CWorld::Clear, below)
 
 // ------------------------------------------------------------------
 // Console
@@ -42,7 +47,7 @@ static void HL_Status(SHELL_FUNC_ARGS) {
 #ifdef SERIOUSHL_RUN
   CPrintF("[SeriousHL] %s; %s\n", run::Mark(), hl::Status().str_String);
 #else
-  CPrintF("[SeriousHL] %s\n", hl::Status().str_String);
+  CPrintF("[SeriousHL] %s; the world cleared %u times\n", hl::Status().str_String, _ctWorldClears);
   CPrintF("[SeriousHL] %s\n", weapons::Status(player::Local()).str_String);
   CPrintF("[SeriousHL] %s\n", hev::Status().str_String);
   CPrintF("[SeriousHL] %s\n", viewmodel::Status().str_String);
@@ -415,6 +420,28 @@ static void HL_DumpAnims(SHELL_FUNC_ARGS) {
   weapons::DumpAnims(player::Local());
 };
 
+// tests: Sam's level change, as a WorldLink makes it ("Levels\\LevelsMP\\1_2_SunPalace.wld"); a suit sentence
+static void HL_TestChangeLevel(SHELL_FUNC_ARGS) {
+  BEGIN_SHELL_FUNC;
+  const CTString &strWorld = *NEXT_ARG(CTString *);
+  CPrintF("[SeriousHL] level change to %s\n", strWorld.str_String);
+  _pNetwork->ChangeLevel(CTFileName(strWorld), FALSE, 0);
+};
+
+// tests: the crash report - a call to an address in no module, as through a freed object's table
+static void HL_TestCrash(SHELL_FUNC_ARGS) {
+  BEGIN_SHELL_FUNC;
+  typedef void (*FNowhere)(void);
+  FNowhere pfn = (FNowhere)(size_t)0x2B537A4D;
+  pfn();
+};
+
+static void HL_TestSay(SHELL_FUNC_ARGS) {
+  BEGIN_SHELL_FUNC;
+  const CTString &strSentence = *NEXT_ARG(CTString *);
+  suit::Say(strSentence.str_String, 0.0f);
+};
+
 static void HL_TestDamage(SHELL_FUNC_ARGS) {
   BEGIN_SHELL_FUNC;
   hev::TestDamage(player::Local(), NEXT_ARG(CTString *)->str_String);
@@ -484,6 +511,9 @@ static void DeclareUsual(void) {
   ClassicsPlugins()->RegisterMethod(TRUE, "void", "hl_Probe", "void", &HL_Probe);
   ClassicsPlugins()->RegisterMethod(TRUE, "void", "hl_Aim", "CTString", &HL_Aim);
   ClassicsPlugins()->RegisterMethod(TRUE, "void", "hl_TestDamage", "CTString", &HL_TestDamage);
+  ClassicsPlugins()->RegisterMethod(TRUE, "void", "hl_TestChangeLevel", "CTString", &HL_TestChangeLevel);
+  ClassicsPlugins()->RegisterMethod(TRUE, "void", "hl_TestSay", "CTString", &HL_TestSay);
+  ClassicsPlugins()->RegisterMethod(TRUE, "void", "hl_TestCrash", "void", &HL_TestCrash);
   ClassicsPlugins()->RegisterMethod(TRUE, "void", "hl_TestButtons", "CTString", &HL_TestButtons);
   ClassicsPlugins()->RegisterMethod(TRUE, "void", "hl_GoWater", "CTString", &HL_GoWater);
   ClassicsPlugins()->RegisterMethod(TRUE, "void", "hl_WaterEdge", "CTString", &HL_WaterEdge);
@@ -549,6 +579,7 @@ static void HL_OnStep(void) {
     movement::Track(NULL);
     return;
   }
+  crashlog::Phase("a tick");
 #ifndef SERIOUSHL_RUN
   TestTick(pen);
   flashlight::Tick(pen);
@@ -559,17 +590,21 @@ static void HL_OnStep(void) {
   weapons::Pickups(pen);
 #endif
   movement::Track(pen);
+  crashlog::Phase(NULL);
 };
 
 static void HL_OnFrame(CDrawPort *pdp) {
+  crashlog::Phase("a frame");
   devhook::Poll();
 #ifndef SERIOUSHL_RUN
   suit::Frame();
 #endif
+  crashlog::Phase(NULL);
 };
 
 static void HL_OnPostDraw(CDrawPort *pdp) {
   if (!GetGameAPI()->IsGameOn()) return;
+  crashlog::Phase("the HUD");
   CEntity *pen = player::Local();
 #ifdef SERIOUSHL_RUN
   run::Draw(pdp);
@@ -577,12 +612,14 @@ static void HL_OnPostDraw(CDrawPort *pdp) {
   hud::Draw(pdp, pen);
   if (!hud::Active()) weapons::Draw(pdp, pen);
 #endif
+  crashlog::Phase(NULL);
 };
 
 // after the world is drawn (the game's view): Half-Life's things in it
 static void HL_OnRenderView(CWorld &wo, CEntity *penViewer, CAnyProjection3D &apr, CDrawPort *pdp) {
 #ifndef SERIOUSHL_RUN
   if (!GetGameAPI()->IsGameOn() || &wo != IWorld::GetWorld()) return;
+  crashlog::Phase("drawing in the world");
   static std::vector<viewmodel::Placed> aPlaced;
   static std::vector<viewmodel::Beam> aBeams;
   static std::vector<viewmodel::Glow> aGlows;
@@ -594,6 +631,7 @@ static void HL_OnRenderView(CWorld &wo, CEntity *penViewer, CAnyProjection3D &ap
   weapons::CollectWorld(player::Local(), aBeams, aGlows);
   viewmodel::DrawWorld(apr, pdp, aPlaced.empty() ? NULL : &aPlaced[0], (INDEX)aPlaced.size(), aBeams.empty() ? NULL : &aBeams[0],
     (INDEX)aBeams.size(), aGlows.empty() ? NULL : &aGlows[0], (INDEX)aGlows.size());
+  crashlog::Phase(NULL);
 #endif
 };
 
@@ -605,7 +643,8 @@ static void HL_OnPlayerAction(INDEX iClient, INDEX iPlayer, CPlayerAction &pa, I
   movement::OnAction(pa, bFresh);
 };
 
-static void HL_OnWorldLoad(CWorld *pwo, const CTFileName &fnmWorld) {
+// What's kept of a world let go: its entities (the player's own sounds' owner, the mines held), the guns' state.
+static void ReleaseAll(void) {
   hl::Release(); // a new player entity: the next tick takes him from scratch
 #ifndef SERIOUSHL_RUN
   weapons::Reset();
@@ -619,18 +658,42 @@ static void HL_OnWorldLoad(CWorld *pwo, const CTFileName &fnmWorld) {
 #endif
 };
 
+static void HL_OnWorldLoad(CWorld *pwo, const CTFileName &fnmWorld) {
+  crashlog::Phase("a world loaded");
+  ReleaseAll();
+  crashlog::Phase(NULL);
+};
+
 static void HL_OnGameStop(void) {
-  hl::Release();
-#ifndef SERIOUSHL_RUN
-  weapons::Reset();
-  playersounds::Release();
-  flashlight::Release();
-  grenades::Release();
-  tripmine::Release();
-  bolts::Release();
-  suit::Release();
-  hud::ClearHistory();
-#endif
+  crashlog::Phase("the game stopping");
+  ReleaseAll();
+  crashlog::Phase(NULL);
+};
+
+// --- CWorld::Clear (a level change's new world, a game stopped or loaded): before the old world's entities go, all
+// the plugin holds of them is let go - a sound object of ours still owned by one (the player, carried into the next
+// level as a new entity) would be asked by Sam's mixer where its owner is, in freed memory
+typedef void (CWorld::*CWorldClear)(void);
+static CWorldClear _pWorldClear = NULL;
+
+class CWorldHook : public CWorld {
+public:
+  void P_Clear(void) {
+    if (this == IWorld::GetWorld()) {
+      crashlog::Phase("a world clearing");
+      ReleaseAll();
+      _ctWorldClears++;
+    }
+    (this->*_pWorldClear)();
+    crashlog::Phase(NULL);
+  };
+};
+
+static void HookWorldClear(void) {
+  StructPtr ptr(ClassicsCore_GetEngineSymbol("?Clear@CWorld@@QAEXXZ"));
+  if (ptr.iAddress == NULL) return;
+  _pWorldClear = ptr(CWorldClear());
+  CreatePatch(_pWorldClear, &CWorldHook::P_Clear, "SeriousHL: CWorld::Clear()");
 };
 
 
@@ -653,6 +716,8 @@ CLASSICSPATCH_PLUGIN_STARTUP(HIniConfig props, PluginEvents_t &events) {
   DeclareUsual();
 #endif
 
+  crashlog::Init(SERIOUSHL_VERSION);
+  HookWorldClear();
   devhook::Init("SERIOUSBRIDGE_DEV");
   // (the timer, LiveSplit and the speedometer: SeriousSpeedrun, a plugin of its own)
   const BOOL bHooked = hl::Init();
@@ -672,6 +737,7 @@ CLASSICSPATCH_PLUGIN_STARTUP(HIniConfig props, PluginEvents_t &events) {
 };
 
 CLASSICSPATCH_PLUGIN_SHUTDOWN(HIniConfig props) {
+  crashlog::Shutdown();
   devhook::Shutdown();
   hl::Release();
 #ifndef SERIOUSHL_RUN
