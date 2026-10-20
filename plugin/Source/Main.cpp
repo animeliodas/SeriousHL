@@ -12,6 +12,7 @@
 #include "Hev.h"
 #include "ViewModel.h"
 #include "Hud.h"
+#include "PlayerSounds.h"
 #include "HlMove.h"
 #include "Rules.h"
 #include "Run.h"
@@ -41,6 +42,7 @@ static void HL_Status(SHELL_FUNC_ARGS) {
   CPrintF("[SeriousHL] %s\n", hev::Status().str_String);
   CPrintF("[SeriousHL] %s\n", viewmodel::Status().str_String);
   CPrintF("[SeriousHL] %s\n", hud::Status().str_String);
+  CPrintF("[SeriousHL] %s\n", playersounds::Status().str_String);
   CEntity *pen = player::Local();
   const FLOAT *pfArmor = pen != NULL ? (FLOAT *)player::Prop(pen, player::PROP_ARMOR) : NULL;
   if (pen != NULL) CPrintF("[SeriousHL] health %.1f, armour %.1f\n", ((CLiveEntity *)pen)->en_fHealth, pfArmor != NULL ? *pfArmor : 0.0f);
@@ -473,6 +475,7 @@ static void DeclareUsual(void) {
   _pShell->DeclareSymbol("persistent user FLOAT hl_fViewModelFov;", &viewmodel::hl_fViewModelFov);
   _pShell->DeclareSymbol("user FLOAT hl_fMuzzleFlashTime;", &viewmodel::hl_fMuzzleFlashTime);
   _pShell->DeclareSymbol("persistent user INDEX hl_bHud;", &hud::hl_bHud);
+  _pShell->DeclareSymbol("persistent user INDEX hl_bPlayerSounds;", &playersounds::hl_bPlayerSounds);
   _pShell->DeclareSymbol("persistent user FLOAT hl_fHudScale;", &hud::hl_fHudScale);
   _pShell->DeclareSymbol("user INDEX hl_iTestAlt;", &weapons::hl_iTestAlt);
 
@@ -549,6 +552,7 @@ static void HL_OnWorldLoad(CWorld *pwo, const CTFileName &fnmWorld) {
   hl::Release(); // a new player entity: the next tick takes him from scratch
 #ifndef SERIOUSHL_RUN
   weapons::Reset();
+  playersounds::Release();
 #endif
 };
 
@@ -556,6 +560,7 @@ static void HL_OnGameStop(void) {
   hl::Release();
 #ifndef SERIOUSHL_RUN
   weapons::Reset();
+  playersounds::Release();
 #endif
 };
 
@@ -588,6 +593,8 @@ CLASSICSPATCH_PLUGIN_STARTUP(HIniConfig props, PluginEvents_t &events) {
     hev::Init();
     viewmodel::Init();
     hud::Init();
+    playersounds::Init();
+    hl::_pTickHook = &playersounds::Tick;
   }
 #endif
   CPrintF("^cff8800[SeriousHL]^r %s loaded: Half-Life movement %s (autojump %d, bhop cap %d)\n", SERIOUSHL_VERSION,

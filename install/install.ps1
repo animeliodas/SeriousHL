@@ -152,7 +152,7 @@ function Write-CleanWave([string]$Source, [string]$Target) {
 function Install-HalfLifeAssets([string]$Dir, [string]$Valve) {
   $root = Join-Path $Dir 'Sounds\SeriousHL'
   $n = 0
-  foreach ($sub in 'weapons', 'items') {
+  foreach ($sub in 'weapons', 'items', 'player', 'common', 'fvox') {
     $out = Join-Path $root $sub
     New-Item -ItemType Directory -Force -Path $out | Out-Null
     foreach ($f in Get-ChildItem (Join-Path $Valve "sound\$sub") -Filter *.wav -ErrorAction SilentlyContinue) {

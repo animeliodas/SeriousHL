@@ -22,6 +22,10 @@ BOOL Init(void);
 void Release(void);
 CTString Status(void);
 
+// Every tick the rules ran: what went in and came out (the usual build's player sounds; none in the speedrun build).
+typedef void (*TickHook)(CEntity *penPlayer, const rules::Input &in, const rules::Output &out, const rules::Memory &mem);
+extern TickHook _pTickHook;
+
 // The rules' latest: horizontal speed (units a second) and whether he's on the ground (the view model's bob).
 FLOAT Speed(void);
 BOOL OnGround(void);

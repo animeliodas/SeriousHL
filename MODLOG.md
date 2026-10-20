@@ -175,3 +175,9 @@ Route: rules rewritten in the host (pattern "guest's rules headless"), on the Se
     (the Glock's, the .357's, the MP5's reload sounds come this way). Attachments: 88 bytes (name, type, bone, org,
     vectors); the header's numattachments is its 19th int after flags.
 - 2026-10-20: muzzle flashes and the models' own reload sounds; sprites shared (Sprite.cpp: all frames).
+44. Player sounds: Player.es plays its steps, jump grunt, landing, splashes and pain on m_soFootL/R (71, 72), m_soBody
+    (73), m_soMouth (70), resetting the mouth's 3D parameters before each - so they're stopped instead, in the rules'
+    tick (PreMoving: after the actions and the tick's timers and attacks, before the sound is mixed). Half-Life's own
+    play on the plugin's CSoundObjects with the player as owner (SetOwner; let go of on a level change).
+- 2026-10-20: Half-Life's player sounds (steps by surface and pace, jump, landing, fall pain, swim, pain). Steps heard:
+  peak 0.054 over 0.008 quiet (Sam's 0.061).

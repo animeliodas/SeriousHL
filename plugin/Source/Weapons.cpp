@@ -3,13 +3,13 @@
 #include "Weapons.h"
 #include "Hev.h"
 #include "ViewModel.h"
+#include "Sounds.h"
 #include "HlMove.h"
 #include "Movement.h"
 #include "Player.h"
 #include "Physics.h"
 #include "SBridge.h"
 
-#include <Engine/Templates/Stock_CSoundData.h>
 #include <Extras/XGizmo/Objects/StructPtr.h>
 #include <stdio.h>
 #include <map>
@@ -206,33 +206,11 @@ static INDEX *Reserve(CEntity *pw, Gun g) {
 static FLOAT FireX(INDEX iSam) { return _symFX.Exists() ? ((FLOAT *)_symFX.GetValue())[iSam] : 0.0f; };
 static FLOAT FireY(INDEX iSam) { return _symFY.Exists() ? ((FLOAT *)_symFY.GetValue())[iSam] : 0.0f; };
 
-// Half-Life's own sound when the installer took it from the player's Half-Life (Sounds\SeriousHL\<"weapons\x.wav">;
-// a list "a.wav|b.wav" picks one at random, as Half-Life does), else Sam's component. The sound's data is kept here:
-// CEntity::PlaySound(file) lets go of it right after starting it, and the stock frees it - a sound that never comes out.
-static std::map<std::string, CSoundData *> _mapSounds;
+// Half-Life's own sound when the installer took it from the player's Half-Life (Sounds.h; a list "a.wav|b.wav" picks one
+// at random, as Half-Life does), else Sam's component.
 static ULONG _ctHLSounds = 0, _ctSamSounds = 0;
 
-static CSoundData *SoundData(const CTFileName &fnm) {
-  std::map<std::string, CSoundData *>::iterator it = _mapSounds.find(fnm.str_String);
-  if (it != _mapSounds.end()) return it->second;
-  CSoundData *psd = NULL;
-  if (FileExists(fnm)) {
-    try {
-      psd = _pSoundStock->Obtain_t(fnm);
-    } catch (char *strError) {
-      CPrintF(SB_TAG " %s\n", strError);
-    }
-  }
-  _mapSounds[fnm.str_String] = psd;
-  return psd;
-};
-
-void FreeSounds(void) {
-  for (std::map<std::string, CSoundData *>::iterator it = _mapSounds.begin(); it != _mapSounds.end(); it++) {
-    if (it->second != NULL) _pSoundStock->Release(it->second);
-  }
-  _mapSounds.clear();
-};
+void FreeSounds(void) { sounds::FreeAll(); };
 
 static void Sound(CEntity *pen, CEntity *pw, const char *strHL, INDEX iSound, BOOL bSecond, ULONG ulFlags = 0) {
   CSoundObject *pso = (CSoundObject *)player::Prop(pen, bSecond ? PROP_SOUND1 : PROP_SOUND0);
@@ -240,23 +218,11 @@ static void Sound(CEntity *pen, CEntity *pw, const char *strHL, INDEX iSound, BO
   // Sam's guns set these before each of their sounds - and leave them muted ("mute fire": the tommygun, the minigun)
   // or low (the laser's pitch): the object's own range, volume and pitch every time (Sam's fire: 25 m, 1.5)
   pso->Set3DParameters(25.0f, 1.0f, bSecond ? 1.0f : 1.5f, 1.0f);
-  if (strHL != NULL) {
-    // one of the list
-    char strList[160];
-    strncpy(strList, strHL, sizeof(strList) - 1);
-    strList[sizeof(strList) - 1] = 0;
-    const char *astr[8];
-    INDEX ct = 0;
-    for (char *str = strtok(strList, "|"); str != NULL && ct < 8; str = strtok(NULL, "|")) astr[ct++] = str;
-    if (ct > 0) {
-      const CTFileName fnm = CTString("Sounds\\SeriousHL\\") + astr[pw->IRnd() % ct];
-      CSoundData *psd = SoundData(fnm);
-      if (psd != NULL) {
-        pso->Play(psd, SOF_3D | SOF_VOLUMETRIC | ulFlags);
-        _ctHLSounds++;
-        return;
-      }
-    }
+  CSoundData *psd = sounds::Pick(strHL, pw->IRnd());
+  if (psd != NULL) {
+    pso->Play(psd, SOF_3D | SOF_VOLUMETRIC | ulFlags);
+    _ctHLSounds++;
+    return;
   }
   // (a component's id is its class's with its number: (402 << 8) | n)
   if (iSound >= 0) {

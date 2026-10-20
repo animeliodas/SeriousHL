@@ -15,6 +15,7 @@
 namespace hl {
 
 rules::Settings _settings = rules::HALF_LIFE;
+TickHook _pTickHook = NULL;
 INDEX hl_bEnable = TRUE;
 
 static const FLOAT EDGE_AHEAD = 16.0f, EDGE_DOWN = 34.0f; // PM_Friction's trace
@@ -183,6 +184,7 @@ static BOOL Rules(CEntity *pen, const movement::State &stWorld, movement::Result
   if (out.fFallDamage > 0.0f) {
     pen->InflictDirectDamage(pen, pen, DMT_IMPACT, out.fFallDamage, pen->GetPlacement().pl_PositionVector, -st.vUp);
   }
+  if (_pTickHook != NULL) _pTickHook(pen, in, out, _mem);
   res.vMove = out.vMove;
   res.vEnd = out.vEnd;
   res.bJumped = out.bJumped;
