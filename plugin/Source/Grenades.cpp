@@ -11,6 +11,8 @@
 
 namespace grenades {
 
+BlastHook _pBlastHook = NULL;
+
 // Projectile.es (class 501)
 static const ULONG PJ_DAMAGE = (501UL << 8) | 14, PJ_RANGEDAMAGE = (501UL << 8) | 15;
 static const ULONG PJ_HOTSPOT = (501UL << 8) | 16, PJ_FALLOFF = (501UL << 8) | 17, PJ_SOUND = (501UL << 8) | 30;
@@ -24,6 +26,7 @@ struct Thrown {
   Kind kind;
   FLOAT3D vLast;
   BOOL bBounced;
+  FLOAT fRadius; // how far its damage goes, metres
 };
 static const INDEX MAX_THROWN = 32;
 static Thrown _aThrown[MAX_THROWN];
@@ -60,7 +63,7 @@ void Track(CEntity *pen, Kind kind, const FLOAT3D &vVelocity, FLOAT tmFuse) {
   pmen->en_vCurrentTranslationAbsolute = vVelocity;
   FLOAT *pf;
   // RadiusDamage(dmg, dmg x 2.5): from the middle down to nothing at the edge; no blow of its own on what it hits
-  const FLOAT fDamage = kind == K_SATCHEL ? 150.0f : 100.0f;
+  const FLOAT fDamage = (kind == K_SATCHEL || kind == K_TRIPMINE) ? 150.0f : 100.0f;
   if ((pf = (FLOAT *)player::Prop(pen, PJ_DAMAGE)) != NULL) *pf = 0.0f;
   if ((pf = (FLOAT *)player::Prop(pen, PJ_RANGEDAMAGE)) != NULL) *pf = fDamage;
   if ((pf = (FLOAT *)player::Prop(pen, PJ_HOTSPOT)) != NULL) *pf = 0.1f;
@@ -73,7 +76,7 @@ void Track(CEntity *pen, Kind kind, const FLOAT3D &vVelocity, FLOAT tmFuse) {
     ((CRationalEntity *)pen)->SetTimerAfter(tmFuse >= 0.0f ? Max(tmFuse, 0.05f) : 3600.0f);
   }
   _ctMade++;
-  CPrintF(SB_TAG " thrown (%s) at %.2f %.2f %.2f (%.2f s), %.1f m/s, fuse %.2f s\n", kind == K_HAND ? "hand grenade" : kind == K_SATCHEL ? "satchel" : "contact",
+  CPrintF(SB_TAG " thrown (%s) at %.2f %.2f %.2f (%.2f s), %.1f m/s, fuse %.2f s\n", kind == K_HAND ? "hand grenade" : kind == K_SATCHEL ? "satchel" : kind == K_TRIPMINE ? "tripmine" : "contact",
     pen->GetPlacement().pl_PositionVector(1), pen->GetPlacement().pl_PositionVector(2), pen->GetPlacement().pl_PositionVector(3),
     _pTimer->CurrentTick(), vVelocity.Length(), tmFuse);
   if (_ctThrown >= MAX_THROWN) return;
@@ -82,6 +85,7 @@ void Track(CEntity *pen, Kind kind, const FLOAT3D &vVelocity, FLOAT tmFuse) {
   t.kind = kind;
   t.vLast = pen->GetPlacement().pl_PositionVector;
   t.bBounced = FALSE;
+  t.fRadius = 2.5f * fDamage * Unit();
 };
 
 INDEX Detonate(CEntity *penPlayer) {
@@ -124,6 +128,7 @@ static void Exploded(Thrown &t) {
   _ctExplosions++;
   CPrintF(SB_TAG " thrown went off at %.2f %.2f %.2f (%.2f s)%s\n", t.vLast(1), t.vLast(2), t.vLast(3), _pTimer->CurrentTick(),
     penEffect != NULL ? ", Half-Life's sound" : "");
+  if (_pBlastHook != NULL) _pBlastHook(t.vLast, t.fRadius);
 };
 
 void Tick(void) {
@@ -138,7 +143,7 @@ void Tick(void) {
     CMovableEntity *pmen = (CMovableEntity *)pen;
     // Sam's bounce sound out, Half-Life's in
     CSoundObject *psoSam = (CSoundObject *)player::Prop(pen, PJ_SOUND);
-    if (psoSam != NULL && psoSam->IsPlaying() && t.kind != K_CONTACT) {
+    if (psoSam != NULL && psoSam->IsPlaying() && t.kind != K_CONTACT && t.kind != K_TRIPMINE) {
       psoSam->Stop();
       Play(Next(_apsoBounce, _iBounce), pen, t.kind == K_SATCHEL
         ? "weapons\\g_bounce1.wav|weapons\\g_bounce2.wav|weapons\\g_bounce3.wav|weapons\\g_bounce4.wav|weapons\\g_bounce5.wav"
@@ -151,7 +156,7 @@ void Tick(void) {
       }
     }
     // half of Half-Life's gravity (400 u/s², as the level's against Sam's usual 30 m/s²): the rest taken back in the air
-    if (pmen->en_penReference == NULL && pmen->en_fGravityA > 0.0f) {
+    if (pmen->en_penReference == NULL && pmen->en_fGravityA > 0.0f && t.kind != K_TRIPMINE) {
       const FLOAT fHalfLife = 400.0f * Unit() * pmen->en_fGravityA / 30.0f;
       pmen->en_vCurrentTranslationAbsolute -= pmen->en_vGravityDir * ((pmen->en_fGravityA - fHalfLife) * _pTimer->TickQuantum);
     }

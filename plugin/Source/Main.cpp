@@ -16,6 +16,7 @@
 #include "Flashlight.h"
 #include "Grenades.h"
 #include "Suit.h"
+#include "Tripmine.h"
 #include "HlMove.h"
 #include "Rules.h"
 #include "Run.h"
@@ -49,6 +50,7 @@ static void HL_Status(SHELL_FUNC_ARGS) {
   CPrintF("[SeriousHL] %s\n", flashlight::Status().str_String);
   CPrintF("[SeriousHL] %s\n", grenades::Status().str_String);
   CPrintF("[SeriousHL] %s\n", suit::Status().str_String);
+  CPrintF("[SeriousHL] %s\n", tripmine::Status().str_String);
   CEntity *pen = player::Local();
   const FLOAT *pfArmor = pen != NULL ? (FLOAT *)player::Prop(pen, player::PROP_ARMOR) : NULL;
   if (pen != NULL) CPrintF("[SeriousHL] health %.1f, armour %.1f\n", ((CLiveEntity *)pen)->en_fHealth, pfArmor != NULL ? *pfArmor : 0.0f);
@@ -500,6 +502,8 @@ static void DeclareUsual(void) {
   _pShell->DeclareSymbol("user INDEX hl_bTestFlashlight;", &flashlight::hl_bTestFlashlight);
   _pShell->DeclareSymbol("persistent user INDEX hl_bSuitVoice;", &suit::hl_bSuitVoice);
   _pShell->DeclareSymbol("persistent user FLOAT hl_fSuitVolume;", &suit::hl_fSuitVolume);
+  _pShell->DeclareSymbol("persistent user INDEX hl_bWorldModels;", &viewmodel::hl_bWorldModels);
+  _pShell->DeclareSymbol("user INDEX hl_bWorldDebug;", &viewmodel::hl_bWorldDebug);
   _pShell->DeclareSymbol("persistent user FLOAT hl_fHudScale;", &hud::hl_fHudScale);
   _pShell->DeclareSymbol("user INDEX hl_iTestAlt;", &weapons::hl_iTestAlt);
 
@@ -547,6 +551,7 @@ static void HL_OnStep(void) {
   TestTick(pen);
   flashlight::Tick(pen);
   grenades::Tick();
+  tripmine::Tick(pen);
   suit::Tick(pen);
 #endif
   movement::Track(pen);
@@ -570,6 +575,13 @@ static void HL_OnPostDraw(CDrawPort *pdp) {
 #endif
 };
 
+// after the world is drawn (the game's view): Half-Life's things in it
+static void HL_OnRenderView(CWorld &wo, CEntity *penViewer, CAnyProjection3D &apr, CDrawPort *pdp) {
+#ifndef SERIOUSHL_RUN
+  if (GetGameAPI()->IsGameOn() && &wo == IWorld::GetWorld()) tripmine::Render(apr, pdp);
+#endif
+};
+
 static void HL_OnPlayerAction(INDEX iClient, INDEX iPlayer, CPlayerAction &pa, INDEX iResent) {
   const BOOL bFresh = iResent < 0;
 #ifndef SERIOUSHL_RUN
@@ -585,6 +597,7 @@ static void HL_OnWorldLoad(CWorld *pwo, const CTFileName &fnmWorld) {
   playersounds::Release();
   flashlight::Release();
   grenades::Release();
+  tripmine::Release();
   suit::Release();
 #endif
 };
@@ -596,6 +609,7 @@ static void HL_OnGameStop(void) {
   playersounds::Release();
   flashlight::Release();
   grenades::Release();
+  tripmine::Release();
   suit::Release();
 #endif
 };
@@ -605,6 +619,7 @@ CLASSICSPATCH_PLUGIN_STARTUP(HIniConfig props, PluginEvents_t &events) {
   events.m_processing->OnStep = &HL_OnStep;
   events.m_processing->OnFrame = &HL_OnFrame;
   events.m_rendering->OnPostDraw = &HL_OnPostDraw;
+  events.m_rendering->OnRenderView = &HL_OnRenderView;
   events.m_packet->OnPlayerAction = &HL_OnPlayerAction;
   events.m_world->OnWorldLoad = &HL_OnWorldLoad;
   events.m_game->OnGameStop = &HL_OnGameStop;

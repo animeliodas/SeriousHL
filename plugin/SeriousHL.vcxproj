@@ -24,6 +24,7 @@
     <ClInclude Include="Source\Sounds.h" />
     <ClInclude Include="Source\Sprite.h" />
     <ClInclude Include="Source\Suit.h" />
+    <ClInclude Include="Source\Tripmine.h" />
     <ClInclude Include="Source\ViewModel.h" />
     <ClInclude Include="Source\Weapons.h" />
   </ItemGroup>
@@ -44,6 +45,7 @@
     <ClCompile Include="Source\Sounds.cpp" />
     <ClCompile Include="Source\Sprite.cpp" />
     <ClCompile Include="Source\Suit.cpp" />
+    <ClCompile Include="Source\Tripmine.cpp" />
     <ClCompile Include="Source\ViewModel.cpp" />
     <ClCompile Include="Source\Weapons.cpp" />
   </ItemGroup>

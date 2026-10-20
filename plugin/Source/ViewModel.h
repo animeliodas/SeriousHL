@@ -38,6 +38,30 @@ typedef void (*SoundCallback)(const char *strSound);
 void SetSoundCallback(SoundCallback pCallback);
 CTString Status(void);
 
+// --- Half-Life's things in the world (a tripmine on a wall and its beam), drawn after Sam's world (the OnRenderView
+// event), in its depth.
+extern INDEX hl_bWorldModels; // 1: drawn
+extern INDEX hl_bWorldDebug;  // tests: Sam's depth buffer read back, in the status
+// A model: its file, sequence and frame, body groups; where (Sam's world), its axes there (Half-Life's x ahead, y left,
+// z up), metres a unit, how lit (0..1).
+struct Placed {
+  const char *strModel;
+  INDEX iSeq;
+  FLOAT fFrame;
+  INDEX iBody;
+  FLOAT3D vPos, vAhead, vLeft, vUp;
+  FLOAT fUnit, fLight;
+};
+// A beam: a sprite (Models\SeriousHL\sprites, "laserbeam") from one end to the other, this wide (metres), its colour
+// (0..1, added).
+struct Beam {
+  FLOAT3D vFrom, vTo;
+  FLOAT fWidth;
+  FLOAT fR, fG, fB;
+  const char *strSprite;
+};
+void DrawWorld(CAnyProjection3D &apr, CDrawPort *pdp, const Placed *aPlaced, INDEX ctPlaced, const Beam *aBeams, INDEX ctBeams);
+
 }; // namespace
 
 #endif

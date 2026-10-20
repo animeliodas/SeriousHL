@@ -38,6 +38,8 @@ F_glPopAttrib xglPopAttrib = NULL;
 F_glPushClientAttrib xglPushClientAttrib = NULL;
 F_glPopClientAttrib xglPopClientAttrib = NULL;
 F_glGetIntegerv xglGetIntegerv = NULL;
+F_glGetFloatv xglGetFloatv = NULL;
+F_glReadPixels xglReadPixels = NULL;
 F_glIsEnabled xglIsEnabled = NULL;
 F_wglGetCurrentContext xwglGetCurrentContext = NULL;
 F_wglGetProcAddress xwglGetProcAddress = NULL;
@@ -82,6 +84,8 @@ BOOL Load(void) {
   if ((xglPushClientAttrib = (F_glPushClientAttrib)GetProcAddress(hGL, "glPushClientAttrib")) == NULL) return FALSE;
   if ((xglPopClientAttrib = (F_glPopClientAttrib)GetProcAddress(hGL, "glPopClientAttrib")) == NULL) return FALSE;
   if ((xglGetIntegerv = (F_glGetIntegerv)GetProcAddress(hGL, "glGetIntegerv")) == NULL) return FALSE;
+  if ((xglGetFloatv = (F_glGetFloatv)GetProcAddress(hGL, "glGetFloatv")) == NULL) return FALSE;
+  if ((xglReadPixels = (F_glReadPixels)GetProcAddress(hGL, "glReadPixels")) == NULL) return FALSE;
   if ((xglIsEnabled = (F_glIsEnabled)GetProcAddress(hGL, "glIsEnabled")) == NULL) return FALSE;
   if ((xwglGetCurrentContext = (F_wglGetCurrentContext)GetProcAddress(hGL, "wglGetCurrentContext")) == NULL) return FALSE;
   if ((xwglGetProcAddress = (F_wglGetProcAddress)GetProcAddress(hGL, "wglGetProcAddress")) == NULL) return FALSE;

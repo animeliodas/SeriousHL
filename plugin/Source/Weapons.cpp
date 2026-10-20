@@ -5,6 +5,7 @@
 #include "ViewModel.h"
 #include "Sounds.h"
 #include "Grenades.h"
+#include "Tripmine.h"
 #include "HlMove.h"
 #include "Movement.h"
 #include "Player.h"
@@ -91,11 +92,13 @@ static CSymbolPtr _symFX, _symFY;
 
 // --- Half-Life's guns
 enum Gun { G_NONE, G_CROWBAR, G_PYTHON, G_GLOCK, G_SHOTGUN, G_MP5, G_RPG, G_GRENADE, G_GAUSS, G_EGON, G_SATCHEL,
-  G_CROSSBOW, G_COUNT };
+  G_CROSSBOW, G_TRIPMINE, G_COUNT };
 static const char *_astrGun[G_COUNT] = { "-", "crowbar", ".357", "glock", "shotgun", "mp5", "rpg", "grenade", "gauss",
-  "egon", "satchel", "crossbow" };
-static const INDEX _aiClip[G_COUNT] = { 0, 0, 6, 17, 8, 50, 1, 0, 0, 0, 0, 5 };
-static const FLOAT _afReload[G_COUNT] = { 0, 0, 2.0f, 1.5f, 0.5f, 1.5f, 2.0f, 0, 0, 0, 0, 4.5f }; // (shotgun: a shell)
+  "egon", "satchel", "crossbow", "tripmine" };
+static const INDEX _aiClip[G_COUNT] = { 0, 0, 6, 17, 8, 50, 1, 0, 0, 0, 0, 5, 0 };
+static const FLOAT _afReload[G_COUNT] = { 0, 0, 2.0f, 1.5f, 0.5f, 1.5f, 2.0f, 0, 0, 0, 0, 4.5f, 0 }; // (shotgun: a shell)
+// the cannon carries two of Half-Life's: the satchels and the tripmines, from its balls - the one taken last
+static Gun _gCannon = G_SATCHEL;
 
 // skill.cfg sk_plr_*, in Half-Life's units; the fire functions take metres
 static const FLOAT DMG_CROWBAR = 10.0f, DMG_357 = 40.0f, DMG_9MM = 8.0f, DMG_BUCKSHOT = 5.0f, DMG_MP5 = 5.0f;
@@ -113,6 +116,7 @@ struct GunState {
 };
 static GunState _aGuns[G_COUNT];
 static INDEX _iLastSam = -1;
+static Gun _gLastGun = G_NONE;
 static BOOL _bOldFire = FALSE, _bOldAlt = FALSE;
 static BOOL _bCharging = FALSE;   // gauss
 static TIME _tmChargeStart = 0, _tmChargeDrain = 0;
@@ -136,6 +140,7 @@ static const ViewGun _aView[G_COUNT] = {
   { "v_egon.mdl", 9, 0, 10 },       // EGON_DRAW, _IDLE1, _HOLSTER
   { "v_satchel.mdl", 2, 0, -1 },    // SATCHEL_DRAW, _IDLE1 (the radio's once some are out)
   { "v_crossbow.mdl", 8, 0, 10 },   // CROSSBOW_DRAW1, _IDLE1, _HOLSTER1
+  { "v_tripmine.mdl", 6, 0, 5 },    // TRIPMINE_DRAW, _IDLE1, _HOLSTER
 };
 static Gun _gView = G_NONE;
 static BOOL _bHolstered = FALSE, _bRadio = FALSE;
@@ -192,7 +197,7 @@ static Gun GunFor(INDEX iSam) {
     case W_GRENADELAUNCHER: return G_GRENADE;
     case W_LASER: return G_GAUSS;
     case W_MINIGUN: return G_EGON;
-    case W_IRONCANNON: return G_SATCHEL;
+    case W_IRONCANNON: return _gCannon;
     case W_SNIPER: return G_CROSSBOW;
   }
   return G_NONE;
@@ -202,7 +207,7 @@ static Gun GunFor(INDEX iSam) {
 static INDEX *Reserve(CEntity *pw, Gun g) {
   switch (g) {
     case G_GLOCK: case G_MP5: case G_EGON: return (INDEX *)player::Prop(pw, PW_BULLETS);
-    case G_SATCHEL: return (INDEX *)player::Prop(pw, PW_IRONBALLS);
+    case G_SATCHEL: case G_TRIPMINE: return (INDEX *)player::Prop(pw, PW_IRONBALLS);
     case G_CROSSBOW: return (INDEX *)player::Prop(pw, PW_SNIPERBULLETS);
     case G_SHOTGUN: return (INDEX *)player::Prop(pw, PW_SHELLS);
     case G_RPG: return (INDEX *)player::Prop(pw, PW_ROCKETS);
@@ -334,7 +339,8 @@ static CEntity *NewGrenade(CEntity *pw, INDEX iPower, const FLOAT3D &vFrom) {
 static FLOAT3D Eyes(CEntity *pen) { return IWorld::GetViewpoint((CPlayerEntity *)pen, FALSE).pl_PositionVector; };
 
 static const char *_astrHudFile[G_COUNT] = { NULL, "weapon_crowbar", "weapon_357", "weapon_9mmhandgun", "weapon_shotgun",
-  "weapon_9mmar", "weapon_rpg", "weapon_handgrenade", "weapon_gauss", "weapon_egon", "weapon_satchel", "weapon_crossbow" };
+  "weapon_9mmar", "weapon_rpg", "weapon_handgrenade", "weapon_gauss", "weapon_egon", "weapon_satchel", "weapon_crossbow",
+  "weapon_tripmine" };
 
 // --- Half-Life's weapon menu (hud ammo.cpp: buckets 1-5, positions in them), on Sam's guns: the slot keys open it,
 // press again for the next in the slot, fire takes the one picked (or at once with hl_bFastSwitch); the wheel goes
@@ -343,7 +349,7 @@ static const char *_astrHudFile[G_COUNT] = { NULL, "weapon_crowbar", "weapon_357
 struct HLSlot { Gun g; INDEX iSlot, iPos; };
 static const HLSlot _aSlots[] = {
   { G_CROWBAR, 0, 0 }, { G_GLOCK, 1, 0 }, { G_PYTHON, 1, 1 }, { G_MP5, 2, 0 }, { G_SHOTGUN, 2, 1 }, { G_CROSSBOW, 2, 2 },
-  { G_RPG, 3, 0 }, { G_GAUSS, 3, 1 }, { G_EGON, 3, 2 }, { G_GRENADE, 4, 0 }, { G_SATCHEL, 4, 1 },
+  { G_RPG, 3, 0 }, { G_GAUSS, 3, 1 }, { G_EGON, 3, 2 }, { G_GRENADE, 4, 0 }, { G_SATCHEL, 4, 1 }, { G_TRIPMINE, 4, 2 },
 };
 static const INDEX CT_SLOTS = sizeof(_aSlots) / sizeof(_aSlots[0]);
 // the hosts (the first he has), and Sam's slot key for each of Sam's weapons
@@ -359,7 +365,7 @@ static INDEX Host(CEntity *pw, Gun g) {
     case G_GRENADE: aiHosts[0] = W_GRENADELAUNCHER; break;
     case G_GAUSS: aiHosts[0] = W_LASER; break;
     case G_EGON: aiHosts[0] = W_MINIGUN; break;
-    case G_SATCHEL: aiHosts[0] = W_IRONCANNON; break;
+    case G_SATCHEL: case G_TRIPMINE: aiHosts[0] = W_IRONCANNON; break;
     case G_CROSSBOW: aiHosts[0] = W_SNIPER; break;
   }
   const INDEX iHave = player::PropIndex(pw, PW_AVAILABLE, 0);
@@ -434,6 +440,7 @@ static void Take(CEntity *pen, CEntity *pw, INDEX iSlotIndex) {
   }
   MenuSound(pen, pw, "common\\wpn_select.wav");
   if (_gHolding != g) _gLast = _gHolding;
+  if (g == G_SATCHEL || g == G_TRIPMINE) _gCannon = g;
   _iTargetSam = iSam;
   _ctTries = 0;
   _ctPicks++;
@@ -442,13 +449,19 @@ static void Take(CEntity *pen, CEntity *pw, INDEX iSlotIndex) {
 // TRUE: fire went to the menu (taking the gun)
 static BOOL Select(CEntity *pen, CEntity *pw, CPlayerAction &pa, Gun gInHand) {
   _gHolding = gInHand;
+  const ULONG ulKeyMask = 0x1FUL << PLACT_SELECT_SHIFT;
+  const INDEX iKey = (INDEX)((pa.pa_ulButtons & ulKeyMask) >> PLACT_SELECT_SHIFT);
   if (!hl_bSlots) {
+    // (Sam's own keys: the cannon's again with the cannon in hand swaps the satchels and the tripmines)
+    if (iKey != 0 && iKey != _iOldKey && iKey == SamKey(W_IRONCANNON) && player::PropIndex(pw, PW_CURRENT, 0) == W_IRONCANNON) {
+      _gCannon = _gCannon == G_SATCHEL ? G_TRIPMINE : G_SATCHEL;
+      MenuSound(pen, pw, "common\\wpn_select.wav");
+    }
+    _iOldKey = iKey;
     _bMenu = FALSE;
     _iTargetSam = -1;
     return FALSE;
   }
-  const ULONG ulKeyMask = 0x1FUL << PLACT_SELECT_SHIFT;
-  const INDEX iKey = (INDEX)((pa.pa_ulButtons & ulKeyMask) >> PLACT_SELECT_SHIFT);
   const ULONG ulMenuButtons = pa.pa_ulButtons & (PLACT_WEAPON_NEXT | PLACT_WEAPON_PREV | PLACT_WEAPON_FLIP | PLACT_FIRE);
   const ULONG ulPressed = ulMenuButtons & ~_ulOldMenuButtons;
   _ulOldMenuButtons = ulMenuButtons;
@@ -652,8 +665,9 @@ static void Filter(CEntity *pen, CPlayerAction &pa) {
     return;
   }
   ViewTake(g);
-  if (iSam != _iLastSam) {
+  if (iSam != _iLastSam || g != _gLastGun) {
     _iLastSam = iSam;
+    _gLastGun = g;
     gs.tmNext = Max(gs.tmNext, tmNow + 0.5f);
     _bCharging = FALSE;
     _bPinPulled = FALSE;
@@ -922,6 +936,27 @@ static void Filter(CEntity *pen, CPlayerAction &pa) {
       }
     }
     } break;
+  case G_TRIPMINE:
+    // tripmine.cpp: on the wall ahead (128 units at most), facing out; nothing there, nothing placed; 0.3 s apart
+    if (bFire && Due(tmNow, gs.tmNext) && iReserve > 0) {
+      FLOAT3D vHit, vNormal;
+      CEntity *penWall = NULL;
+      if (tripmine::Aim(pen, vHit, vNormal, penWall)) {
+        CEntity *penM = NewGrenade(pw, 0, vHit + vNormal * (8.0f * Unit()));
+        if (penM != NULL) {
+          grenades::Track(penM, grenades::K_TRIPMINE, FLOAT3D(0, 0, 0), -1.0f);
+          tripmine::Add(penM, pen, vNormal, penWall);
+          if (piReserve != NULL) (*piReserve)--;
+          Anim(pw, "Fire");
+          View(6); // TRIPMINE_DRAW (the next one)
+          _ctShots++;
+          _fLastDamage = 150.0f;
+          Log("placed", g, tripmine::Count(), piReserve != NULL ? *piReserve : -1);
+        }
+      }
+      gs.tmNext = tmNow + 0.3f;
+    }
+    break;
   case G_CROSSBOW:
     // a bolt (Sam's sniper bullet), 0.75 s apart, 5 in the clip; through the scope from the middle of the view
     if (bFire && Due(tmNow, gs.tmNext) && gs.iClip > 0) {
@@ -980,6 +1015,7 @@ void Reset(void) {
     _aGuns[i].tmReloaded = 0;
   }
   _iLastSam = -1;
+  _gLastGun = G_NONE;
   _bCharging = FALSE;
   _bPinPulled = FALSE;
   _tmRedraw = 0;

@@ -199,3 +199,22 @@ Route: rules rewritten in the host (pattern "guest's rules headless"), on the Se
 48. Cinematics and auto actions: the guns' filter leaves the action alone (the fire skips the intro, as Sam's).
 - 2026-10-20: Half-Life's hand grenade (pin, cook, throw by the view's pitch), satchel and MP5 grenade with their
   sounds; the menu's fire no longer shoots the gun in hand; no shots in cinematics.
+49. The HEV voice: Half-Life's sound/sentences.txt (HEV_* lines) said as the engine's VOX says them - a word's folder
+    from the first one with a slash, "(p v e)" right after a word for it alone, alone for all after; "," and "." the
+    words _comma and _period. A word's time is its wave's length x e / p; the next one starts then (Frame: every
+    rendered frame, the high precision timer). CBasePlayer::TakeDamage's rules on m_lastDamageAmount (the whole hit,
+    armour's part too); EMIT_SOUND_SUIT: suitvolume 0.25, every other sentence pitch 98-104.
+50. Drawing in Sam's world: the OnRenderView event comes after RenderView; the projection's GL frustum is
+    CDrawPort::SetProjection's, but the perspective ratios are negative on both axes here (-720 -720 at 1080p): the
+    frustum's sides from their magnitudes. Sam's world depth, read back (glReadPixels at two known distances): 0.9 x
+    (1 - near / z) with near 0.1875 m - a level with a background viewer (the sky drawn first) keeps the world in the
+    first 0.9 of the depth range, though the projection's own range says 0..1. The projection comes unprepared (the
+    models drawn last): Prepare() again. Model space into the world: Half-Life's x ahead, y left, z up on the thing's
+    axes, units by hl_fUnit; the eye's from the viewer's placement (v - p) * !rotation.
+51. A tripmine is a Sam grenade (FireGrenade) made still (no EPF_TRANSLATEDBYGRAVITY, no speeds), its model stretched
+    to nothing and no particles; its beam a CCastRay from it (its own sectors: 0.25 ms) every 0.1 s through what
+    Half-Life's traces pass (items, the dead, predictors: ContinueCast). It's held by a CEntityPointer so the sound
+    objects it owns never point at freed memory.
+- 2026-10-20: the HEV suit's voice; Half-Life's tripmines (on the cannon with the satchels, the cannon key swaps them)
+  drawn in Sam's world with their lasers. test_weapons suit, tripmine PASS TFE and TSE; satchel, slots, grenade PASS TFE.
+  One TFE level load (StartMap of 11_AlleyOfSphinxes after the satchel check) hung once, not on the rerun.

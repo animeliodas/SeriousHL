@@ -24,7 +24,10 @@ at a target, its health):
            pin with Half-Life's explosion sound, bounces with its;
   suit     the HEV suit's voice: a 40 point bullet from full health with no armour - blood loss, then the automedic and the
            morphine (Half-Life's TakeDamage), said word by word, the next 3.5 s after; a fall then says nothing new
-           at once (one sentence at a time).
+           at once (one sentence at a time);
+  tripmine the tripmine (on the cannon, Half-Life's menu: 5 three times): put on the floor below, powered 2.5 s later
+           with its beam up; the player stepping back over it breaks the beam - it goes off, Half-Life's sound; and
+           with hl_bSlots 0, Sam's cannon key again swaps the satchels and the tripmines.
 Prints PASS/FAIL per check.
 """
 import argparse
@@ -35,7 +38,7 @@ import time
 import test_hl
 import test_loudness
 
-ALL = ("damage", "crowbar", "rate", "clip", "gauss", "sounds", "hev", "egon", "satchel", "crossbow", "slots", "grenade", "suit")
+ALL = ("damage", "crowbar", "rate", "clip", "gauss", "sounds", "hev", "egon", "satchel", "crossbow", "slots", "grenade", "suit", "tripmine")
 UNIT = test_hl.UNIT
 # Sam's WeaponType and the key slots: TFE / TSE
 SAM = {"tfe": {"knife": (1, 1), "colt": (2, 2), "doublecolt": (3, 2), "shotgun": (4, 3), "tommygun": (6, 4), "laser": (14, 8),
@@ -93,6 +96,16 @@ class Guns:
             return {}
         c = m[-1]
         return {"clip": int(c[0]), "reserve": int(c[1]), "beam": bool(c[3]), "satchels": int(c[4]), "shots": int(c[5])}
+
+    def cannon(self, want: str) -> bool:
+        """the cannon's two of Half-Life's: Sam's cannon key again swaps them (hl_bSlots 0)"""
+        for _ in range(3):
+            out = self.game.run("hl_Status();", want="weapons")
+            if f"= {want}," in out:
+                return True
+            self.game.run(f"hl_iTestSelect={self.sam['cannon'][1]};")
+            time.sleep(0.6)
+        return f"= {want}," in self.game.run("hl_Status();", want="weapons")
 
     def shots(self) -> int:
         out = self.game.run("hl_Status();", want="weapons")
@@ -213,8 +226,8 @@ def check_egon(game, guns, results):
 
 def check_satchel(game, guns, results):
     guns.spawn("Boneman", 4.0)
-    if not guns.take("cannon"):
-        results.append(("satchel", False, "no cannon"))
+    if not guns.take("cannon") or not guns.cannon("satchel"):
+        results.append(("satchel", False, "no cannon (or no satchel on it)"))
         return
     h0 = guns.health()
     game.run("hl_iTestFire=1;")
@@ -244,6 +257,8 @@ def check_crossbow(game, guns, results):
 
 
 def check_slots(game, guns, results):
+    # (from a gun not in the picks, by Sam's keys: the flip goes back to it)
+    guns.take("colt")
     game.run("hl_bSlots=1;", "hl_bFastSwitch=0;")
     picks = []
 
@@ -382,6 +397,55 @@ def check_suit(game, guns, results):
                     f"{v0[1]} sentences known; health {r[0]:.0f} -> {r[1]:.0f}; said {said}, last {last}, {words} words"))
 
 
+def wait_for(game, mark: int, text: str, timeout: float) -> bool:
+    end = time.time() + timeout
+    while time.time() < end:
+        if text in game.text()[mark:]:
+            return True
+        time.sleep(0.1)
+    return False
+
+
+def check_tripmine(game, guns, results):
+    if not guns.take("cannon"):
+        results.append(("tripmine", False, "no cannon"))
+        return
+    game.run("hl_bSlots=1;", "hl_bFastSwitch=0;")
+    for _ in range(3):
+        game.run("hl_iTestSelect=5;")
+        time.sleep(0.4)
+    game.run("hl_iTestFire=1;")
+    time.sleep(1.5)
+    st = game.run("hl_Status();", want="weapons")
+    taken = "= tripmine" in st
+    mark = len(game.text())
+    # (on the floor 45 degrees down ahead: not under him; the game's time, not ours - wait for what it says)
+    game.run("hl_fTestPitch=-45;")
+    time.sleep(0.5)
+    game.run("hl_iTestFire=1;")
+    wait_for(game, mark, "tripmine on", 8.0)
+    game.run("hl_fTestPitch=0;")
+    on = re.findall(r"tripmine on: beam ([\d.]+) m", game.text()[mark:])
+    at = re.findall(r"tripmine placed at ([\d.-]+) ([\d.-]+) ([\d.-]+)", game.text()[mark:])
+    where = re.findall(r"where: ([\d.-]+) ([\d.-]+) ([\d.-]+)", game.run("hl_Where();", want="where:"))
+    if at and where:
+        dx, dz = float(at[-1][0]) - float(where[-1][0]), float(at[-1][2]) - float(where[-1][2])
+        game.run(f'hl_Move("{dx:.2f} 0 {dz:.2f}");', want="player at")
+    wait_for(game, mark, "thrown went off", 5.0)
+    log = game.text()[mark:]
+    placed = re.findall(r"tripmine placed at", log)
+    off = re.findall(r"tripmine set off \(([^)]*)\)", log)
+    went = re.findall(r"thrown went off at [\d.-]+ [\d.-]+ [\d.-]+ \([\d.]+ s\)(, Half-Life's sound)?", log)
+    st = game.run("hl_Status();", want="tripmines")
+    trip = re.findall(r"tripmines: .*", st)
+    game.run("hl_bSlots=0;")
+    swapped = guns.cannon("satchel") and guns.cannon("tripmine")
+    ok = swapped and taken and len(placed) == 1 and len(on) == 1 and float(on[0]) > 3.0 and off and off[0].startswith("beam") \
+        and went and went[-1] != ""
+    results.append(("tripmine: taken from the menu, placed below, powered with a beam, set off by the player", ok,
+                    f"taken {taken}, swapped by the key {swapped}, placed {len(placed)}, beam {on}, set off {off}, went off {went}; {trip[-1] if trip else '-'}"))
+
+
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--game", required=True)
@@ -396,7 +460,8 @@ def main() -> None:
         test_hl.launch(game)
     checks = {"damage": check_damage, "crowbar": check_crowbar, "rate": check_rate, "clip": check_clip, "gauss": check_gauss,
               "sounds": check_sounds, "hev": check_hev, "egon": check_egon, "satchel": check_satchel,
-              "crossbow": check_crossbow, "slots": check_slots, "grenade": check_grenade, "suit": check_suit}
+              "crossbow": check_crossbow, "slots": check_slots, "grenade": check_grenade, "suit": check_suit,
+              "tripmine": check_tripmine}
     results = []
     for name in a.only.split(","):
         try:

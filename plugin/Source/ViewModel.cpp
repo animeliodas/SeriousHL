@@ -440,6 +440,99 @@ static inline void ToEye(const float *v, float *e) {
   e[2] = -v[0];
 };
 
+// (as ToEye: the view model's space is the eye's, turned)
+static const Mat34 _mModelToEye = { { 0, -1, 0, 0 }, { 0, 0, 1, 0 }, { -1, 0, 0, 0 } };
+
+// A model's meshes as its bones put them, into the eye's space by mToEye (turned and scaled, then moved), lit by a light
+// shining along vLightEye (the eye's space): the solid and masked textures first, the additive ones over them.
+static ULONG Meshes(Model &m, const Mat34 *amBones, INDEX iBody, const Mat34 &mToEye, const FLOAT3D &vLightEye, FLOAT fAmbient, FLOAT fDiffuse) {
+  const StudioHeader *ph = m.Header();
+  const short *pskins = m.At<short>(ph->skinindex);
+  const StudioTexture *ptex = m.At<StudioTexture>(ph->textureindex);
+  const StudioBodyPart *pparts = m.At<StudioBodyPart>(ph->bodypartindex);
+  static float afVerts[MAX_VERTS][3], afLight[MAX_VERTS], afNormEye[MAX_VERTS][3];
+  ULONG ctTris = 0;
+  for (INDEX iPass = 0; iPass < 2; iPass++) {
+    if (iPass == 0) {
+      gl::xglDisable(GL_BLEND);
+      gl::xglEnable(GL_ALPHA_TEST);
+      gl::xglAlphaFunc(GL_GREATER, 0.5f);
+      gl::xglDepthMask(GL_TRUE);
+    } else {
+      gl::xglDisable(GL_ALPHA_TEST);
+      gl::xglEnable(GL_BLEND);
+      gl::xglBlendFunc(GL_ONE, GL_ONE);
+      gl::xglDepthMask(GL_FALSE);
+    }
+    for (int bp = 0; bp < ph->numbodyparts; bp++) {
+      const StudioBodyPart &part = pparts[bp];
+      if (part.nummodels <= 0) continue;
+      const int iSub = (iBody / Max(part.base, 1)) % part.nummodels;
+      const StudioModel &sm = m.At<StudioModel>(part.modelindex)[iSub];
+      if (sm.numverts <= 0 || sm.numverts > MAX_VERTS || sm.numnorms > MAX_VERTS) continue;
+      const UBYTE *pvertbone = m.At<UBYTE>(sm.vertinfoindex);
+      const UBYTE *pnormbone = m.At<UBYTE>(sm.norminfoindex);
+      const Vec3 *pverts = m.At<Vec3>(sm.vertindex);
+      const Vec3 *pnorms = m.At<Vec3>(sm.normindex);
+      for (int v = 0; v < sm.numverts; v++) {
+        const Mat34 &mb = amBones[pvertbone[v] < ph->numbones ? pvertbone[v] : 0];
+        const float *p = pverts[v];
+        float w[3];
+        for (int i = 0; i < 3; i++) w[i] = p[0] * mb[i][0] + p[1] * mb[i][1] + p[2] * mb[i][2] + mb[i][3];
+        for (int i = 0; i < 3; i++) afVerts[v][i] = w[0] * mToEye[i][0] + w[1] * mToEye[i][1] + w[2] * mToEye[i][2] + mToEye[i][3];
+      }
+      for (int n = 0; n < sm.numnorms; n++) {
+        const Mat34 &mb = amBones[pnormbone[n] < ph->numbones ? pnormbone[n] : 0];
+        const float *p = pnorms[n];
+        float w[3], e[3];
+        for (int i = 0; i < 3; i++) w[i] = p[0] * mb[i][0] + p[1] * mb[i][1] + p[2] * mb[i][2];
+        for (int i = 0; i < 3; i++) e[i] = w[0] * mToEye[i][0] + w[1] * mToEye[i][1] + w[2] * mToEye[i][2];
+        const float fLen = sqrtf(e[0] * e[0] + e[1] * e[1] + e[2] * e[2]);
+        if (fLen > 0.0f) for (int i = 0; i < 3; i++) e[i] /= fLen;
+        memcpy(afNormEye[n], e, sizeof(e));
+        // (Sam's light: its direction is where it shines to)
+        const float fDot = -(e[0] * vLightEye(1) + e[1] * vLightEye(2) + e[2] * vLightEye(3));
+        afLight[n] = Min(fAmbient + fDiffuse * Max(fDot, 0.0f), 1.0f);
+      }
+      const StudioMesh *pmeshes = m.At<StudioMesh>(sm.meshindex);
+      for (int me = 0; me < sm.nummesh; me++) {
+        const StudioMesh &mesh = pmeshes[me];
+        const int iTex = pskins[mesh.skinref];
+        if (iTex < 0 || iTex >= ph->numtextures) continue;
+        const StudioTexture &tex = ptex[iTex];
+        const BOOL bAdditive = (tex.flags & NF_ADDITIVE) != 0;
+        if ((iPass == 1) != bAdditive) continue;
+        gl::xglBindTexture(GL_TEXTURE_2D, m.aulTextures[iTex]);
+        const float fS = 1.0f / Max(tex.width, 1), fT = 1.0f / Max(tex.height, 1);
+        const BOOL bChrome = (tex.flags & NF_CHROME) != 0, bBright = (tex.flags & NF_FULLBRIGHT) != 0 || bAdditive;
+        const short *pcmd = m.At<short>(mesh.triindex);
+        for (int ct = *(pcmd++); ct != 0; ct = *(pcmd++)) {
+          if (ct < 0) {
+            gl::xglBegin(GL_TRIANGLE_FAN);
+            ct = -ct;
+          } else {
+            gl::xglBegin(GL_TRIANGLE_STRIP);
+          }
+          ctTris += ct - 2;
+          for (; ct > 0; ct--, pcmd += 4) {
+            const int iv = pcmd[0] < sm.numverts ? pcmd[0] : 0, in = pcmd[1] < sm.numnorms ? pcmd[1] : 0;
+            if (bChrome) {
+              gl::xglTexCoord2f(0.5f + 0.5f * afNormEye[in][0], 0.5f - 0.5f * afNormEye[in][1]);
+            } else {
+              gl::xglTexCoord2f(pcmd[2] * fS, pcmd[3] * fT);
+            }
+            const float l = bBright ? 1.0f : afLight[in];
+            gl::xglColor4f(l, l, l, 1.0f);
+            gl::xglVertex3fv(afVerts[iv]);
+          }
+          gl::xglEnd();
+        }
+      }
+    }
+  }
+  return ctTris;
+};
+
 static void Draw(Model &m, CDrawPort *pdp, const FLOAT3D &vLightEye, FLOAT fAmbient, FLOAT fDiffuse) {
   const StudioHeader *ph = m.Header();
   static Mat34 amBones[MAX_BONES];
@@ -493,88 +586,7 @@ static void Draw(Model &m, CDrawPort *pdp, const FLOAT3D &vLightEye, FLOAT fAmbi
   gl::xglEnable(GL_TEXTURE_2D);
   gl::xglTexEnvi(GL_TEXTURE_ENV, GL_TEXTURE_ENV_MODE, GL_MODULATE);
 
-  const short *pskins = m.At<short>(ph->skinindex);
-  const StudioTexture *ptex = m.At<StudioTexture>(ph->textureindex);
-  const StudioBodyPart *pparts = m.At<StudioBodyPart>(ph->bodypartindex);
-  static float afVerts[MAX_VERTS][3], afLight[MAX_VERTS], afNormEye[MAX_VERTS][3];
-  ULONG ctTris = 0;
-  // two passes: solid (and masked) first, additive over them
-  for (INDEX iPass = 0; iPass < 2; iPass++) {
-    if (iPass == 0) {
-      gl::xglDisable(GL_BLEND);
-      gl::xglEnable(GL_ALPHA_TEST);
-      gl::xglAlphaFunc(GL_GREATER, 0.5f);
-      gl::xglDepthMask(GL_TRUE);
-    } else {
-      gl::xglDisable(GL_ALPHA_TEST);
-      gl::xglEnable(GL_BLEND);
-      gl::xglBlendFunc(GL_ONE, GL_ONE);
-      gl::xglDepthMask(GL_FALSE);
-    }
-    for (int bp = 0; bp < ph->numbodyparts; bp++) {
-      const StudioBodyPart &part = pparts[bp];
-      if (part.nummodels <= 0) continue;
-      const int iSub = (_iBody / Max(part.base, 1)) % part.nummodels;
-      const StudioModel &sm = m.At<StudioModel>(part.modelindex)[iSub];
-      if (sm.numverts <= 0 || sm.numverts > MAX_VERTS || sm.numnorms > MAX_VERTS) continue;
-      const UBYTE *pvertbone = m.At<UBYTE>(sm.vertinfoindex);
-      const UBYTE *pnormbone = m.At<UBYTE>(sm.norminfoindex);
-      const Vec3 *pverts = m.At<Vec3>(sm.vertindex);
-      const Vec3 *pnorms = m.At<Vec3>(sm.normindex);
-      for (int v = 0; v < sm.numverts; v++) {
-        const Mat34 &mb = amBones[pvertbone[v] < ph->numbones ? pvertbone[v] : 0];
-        const float *p = pverts[v];
-        float w[3];
-        for (int i = 0; i < 3; i++) w[i] = p[0] * mb[i][0] + p[1] * mb[i][1] + p[2] * mb[i][2] + mb[i][3];
-        ToEye(w, afVerts[v]);
-      }
-      for (int n = 0; n < sm.numnorms; n++) {
-        const Mat34 &mb = amBones[pnormbone[n] < ph->numbones ? pnormbone[n] : 0];
-        const float *p = pnorms[n];
-        float w[3], e[3];
-        for (int i = 0; i < 3; i++) w[i] = p[0] * mb[i][0] + p[1] * mb[i][1] + p[2] * mb[i][2];
-        ToEye(w, e);
-        memcpy(afNormEye[n], e, sizeof(e));
-        // (Sam's light: its direction is where it shines to)
-        const float fDot = -(e[0] * vLightEye(1) + e[1] * vLightEye(2) + e[2] * vLightEye(3));
-        afLight[n] = Min(fAmbient + fDiffuse * Max(fDot, 0.0f), 1.0f);
-      }
-      const StudioMesh *pmeshes = m.At<StudioMesh>(sm.meshindex);
-      for (int me = 0; me < sm.nummesh; me++) {
-        const StudioMesh &mesh = pmeshes[me];
-        const int iTex = pskins[mesh.skinref];
-        if (iTex < 0 || iTex >= ph->numtextures) continue;
-        const StudioTexture &tex = ptex[iTex];
-        const BOOL bAdditive = (tex.flags & NF_ADDITIVE) != 0;
-        if ((iPass == 1) != bAdditive) continue;
-        gl::xglBindTexture(GL_TEXTURE_2D, m.aulTextures[iTex]);
-        const float fS = 1.0f / Max(tex.width, 1), fT = 1.0f / Max(tex.height, 1);
-        const BOOL bChrome = (tex.flags & NF_CHROME) != 0, bBright = (tex.flags & NF_FULLBRIGHT) != 0 || bAdditive;
-        const short *pcmd = m.At<short>(mesh.triindex);
-        for (int ct = *(pcmd++); ct != 0; ct = *(pcmd++)) {
-          if (ct < 0) {
-            gl::xglBegin(GL_TRIANGLE_FAN);
-            ct = -ct;
-          } else {
-            gl::xglBegin(GL_TRIANGLE_STRIP);
-          }
-          ctTris += ct - 2;
-          for (; ct > 0; ct--, pcmd += 4) {
-            const int iv = pcmd[0] < sm.numverts ? pcmd[0] : 0, in = pcmd[1] < sm.numnorms ? pcmd[1] : 0;
-            if (bChrome) {
-              gl::xglTexCoord2f(0.5f + 0.5f * afNormEye[in][0], 0.5f - 0.5f * afNormEye[in][1]);
-            } else {
-              gl::xglTexCoord2f(pcmd[2] * fS, pcmd[3] * fT);
-            }
-            const float l = bBright ? 1.0f : afLight[in];
-            gl::xglColor4f(l, l, l, 1.0f);
-            gl::xglVertex3fv(afVerts[iv]);
-          }
-          gl::xglEnd();
-        }
-      }
-    }
-  }
+  const ULONG ctTris = Meshes(m, amBones, _iBody, _mModelToEye, vLightEye, fAmbient, fDiffuse);
   // the muzzle flashes: sprites facing the eye at their attachments, added
   const CTimerValue tvNow = _pTimer->GetHighPrecisionTimer();
   INDEX ctKept = 0;
@@ -629,6 +641,42 @@ static void Draw(Model &m, CDrawPort *pdp, const FLOAT3D &vLightEye, FLOAT fAmbi
 typedef void (__stdcall *FActiveTexture)(GLenum);
 static FActiveTexture _pglActiveTexture = NULL;
 static const INDEX GL_TEXTURE0_ = 0x84C0, GL_ACTIVE_TEXTURE_ = 0x84E0, GL_MAX_TEXTURE_UNITS_ = 0x84E2;
+static GLint _iActiveUnit = GL_TEXTURE0_, _ctUnits = 1;
+static BOOL _abUnitWasOn[4] = { FALSE, FALSE, FALSE, FALSE };
+
+// all of the GL state saved, the texture units but the first off
+static void BeginGL(void) {
+  if (_pglActiveTexture == NULL) _pglActiveTexture = (FActiveTexture)gl::xwglGetProcAddress("glActiveTextureARB");
+  _iActiveUnit = GL_TEXTURE0_;
+  _ctUnits = 1;
+  if (_pglActiveTexture != NULL) {
+    gl::xglGetIntegerv((GLenum)GL_ACTIVE_TEXTURE_, &_iActiveUnit);
+    gl::xglGetIntegerv((GLenum)GL_MAX_TEXTURE_UNITS_, &_ctUnits);
+    _ctUnits = Min((INDEX)_ctUnits, (INDEX)4);
+    for (GLint u = 1; u < _ctUnits; u++) {
+      _pglActiveTexture((GLenum)(GL_TEXTURE0_ + u));
+      _abUnitWasOn[u] = gl::xglIsEnabled(GL_TEXTURE_2D);
+      gl::xglDisable(GL_TEXTURE_2D);
+    }
+    _pglActiveTexture((GLenum)GL_TEXTURE0_);
+  }
+  gl::xglPushAttrib(GL_ALL_ATTRIB_BITS);
+  gl::xglPushClientAttrib(GL_CLIENT_ALL_ATTRIB_BITS);
+};
+
+// and back as it was
+static void EndGL(void) {
+  gl::xglPopClientAttrib();
+  gl::xglPopAttrib();
+  if (_pglActiveTexture != NULL) {
+    for (GLint u = 1; u < _ctUnits; u++) {
+      if (!_abUnitWasOn[u]) continue;
+      _pglActiveTexture((GLenum)(GL_TEXTURE0_ + u));
+      gl::xglEnable(GL_TEXTURE_2D);
+    }
+    _pglActiveTexture((GLenum)_iActiveUnit);
+  }
+};
 
 static void Render(CEntity *penPlayer, CPerspectiveProjection3D &pr, CDrawPort *pdp, const FLOAT3D &vLightDir, COLOR colLight, COLOR colAmbient) {
   // the light in the eye's space (the view's rotation taken out)
@@ -644,35 +692,192 @@ static void Render(CEntity *penPlayer, CPerspectiveProjection3D &pr, CDrawPort *
   const FLOAT fAmbient = Clamp((Max(Max(ubAR, ubAG), ubAB) + 32) / 255.0f, 0.25f, 1.0f);
   const FLOAT fDiffuse = Clamp((Max(Max(ubLR, ubLG), ubLB) + 32) / 255.0f, 0.0f, 1.0f);
 
-  if (_pglActiveTexture == NULL) _pglActiveTexture = (FActiveTexture)gl::xwglGetProcAddress("glActiveTextureARB");
-  GLint iActive = GL_TEXTURE0_, ctUnits = 1;
-  BOOL abWasOn[4] = { FALSE, FALSE, FALSE, FALSE };
-  if (_pglActiveTexture != NULL) {
-    gl::xglGetIntegerv((GLenum)GL_ACTIVE_TEXTURE_, &iActive);
-    gl::xglGetIntegerv((GLenum)GL_MAX_TEXTURE_UNITS_, &ctUnits);
-    ctUnits = Min((INDEX)ctUnits, (INDEX)4);
-    for (GLint u = 1; u < ctUnits; u++) {
-      _pglActiveTexture((GLenum)(GL_TEXTURE0_ + u));
-      abWasOn[u] = gl::xglIsEnabled(GL_TEXTURE_2D);
-      gl::xglDisable(GL_TEXTURE_2D);
-    }
-    _pglActiveTexture((GLenum)GL_TEXTURE0_);
-  }
-  gl::xglPushAttrib(GL_ALL_ATTRIB_BITS);
-  gl::xglPushClientAttrib(GL_CLIENT_ALL_ATTRIB_BITS);
+  BeginGL();
   Draw(*_pmModel, pdp, vLightEye, fAmbient, fDiffuse);
-  gl::xglPopClientAttrib();
-  gl::xglPopAttrib();
-  if (_pglActiveTexture != NULL) {
-    for (GLint u = 1; u < ctUnits; u++) {
-      if (!abWasOn[u]) continue;
-      _pglActiveTexture((GLenum)(GL_TEXTURE0_ + u));
-      gl::xglEnable(GL_TEXTURE_2D);
-    }
-    _pglActiveTexture((GLenum)iActive);
-  }
+  EndGL();
   _ctFrames++;
   _bDrawn = TRUE;
+};
+
+// --- Half-Life's models and beams in the world (after Sam's world is drawn, before his weapon): in its depth, by its
+// projection (CDrawPort::SetProjection's frustum: the screen box over the perspective ratios at the near plane)
+static ULONG _ctWorldDrawn = 0, _ctBeamsDrawn = 0;
+static FLOAT _afProjDebug[4] = { 0, 0, 0, 0 }; // ours and the GL's left there: x scale, z scale (tests)
+static CTString _strWorldDebug, _strPlacedDebug, _strDepthDebug;
+INDEX hl_bWorldDebug = FALSE;
+INDEX hl_bWorldModels = TRUE;
+
+void DrawWorld(CAnyProjection3D &apr, CDrawPort *pdp, const Placed *aPlaced, INDEX ctPlaced, const Beam *aBeams, INDEX ctBeams) {
+  if (ctPlaced + ctBeams <= 0 || !hl_bWorldModels || pdp == NULL || !apr.IsPerspective()) return;
+  if (_pGfx->GetCurrentAPI() != GAT_OGL || !gl::Load()) return;
+  CPerspectiveProjection3D &ppr = *(CPerspectiveProjection3D *)(CProjection3D *)apr;
+  if (ppr.pr_bMirror || ppr.pr_bWarp) return;
+  // (its ratios and centre again: the models drawn last left it unprepared)
+  ppr.Prepare();
+  const FLOAT2D vMin = ppr.pr_ScreenBBox.Min() - ppr.pr_ScreenCenter;
+  const FLOAT2D vMax = ppr.pr_ScreenBBox.Max() - ppr.pr_ScreenCenter;
+  const FLOAT2D vRatio = ppr.ppr_PerspectiveRatios;
+  const FLOAT fNear = ppr.pr_NearClipDistance;
+  const FLOAT fFar = ppr.pr_FarClipDistance < 0.0f ? 1E5f : ppr.pr_FarClipDistance;
+  // (the screen's x to the right, its y down; the ratios' signs are the projection's own)
+  const FLOAT fLeft = vMin(1) / Abs(vRatio(1)) * fNear, fRight = vMax(1) / Abs(vRatio(1)) * fNear;
+  const FLOAT fTop = -vMin(2) / Abs(vRatio(2)) * fNear, fBottom = -vMax(2) / Abs(vRatio(2)) * fNear;
+  // the world into the eye's space: the viewer's turn taken out
+  FLOATmatrix3D mView;
+  MakeRotationMatrixFast(mView, ppr.pr_ViewerPlacement.pl_OrientationAngle);
+  const FLOATmatrix3D mToEye = !mView;
+  const FLOAT3D vViewer = ppr.pr_ViewerPlacement.pl_PositionVector;
+
+  // (tests: Sam's depth buffer at the screen's middle and a quarter lower, against how far the world is there)
+  if (hl_bWorldDebug && IWorld::GetWorld() != NULL) {
+    CTString strDepth;
+    for (INDEX s = 0; s < 2; s++) {
+      const FLOAT fOff = s * pdp->dp_Height / 4.0f;
+      FLOAT3D vDirEye(0.0f, -fOff / Abs(vRatio(2)), -1.0f);
+      const FLOAT fLenEye = vDirEye.Length();
+      FLOAT3D vDir = vDirEye * mView;
+      vDir /= vDir.Length();
+      CCastRay cr(NULL, vViewer, vViewer + vDir * 500.0f);
+      cr.cr_ttHitModels = CCastRay::TT_NONE;
+      IWorld::GetWorld()->CastRay(cr);
+      const FLOAT fZ = cr.cr_penHit != NULL ? cr.cr_fHitDistance / fLenEye : -1.0f;
+      float fDepth = -1.0f;
+      gl::xglReadPixels(pdp->dp_MinI + pdp->dp_Width / 2, pdp->dp_Raster->ra_Height - (pdp->dp_MinJ + pdp->dp_Height / 2 + (PIX)fOff) - 1,
+        1, 1, (GLenum)0x1902 /* GL_DEPTH_COMPONENT */, (GLenum)0x1406 /* GL_FLOAT */, &fDepth);
+      const FLOAT fScale = IWorld::GetWorld()->GetBackgroundViewer() != NULL ? 0.9f : 1.0f;
+      strDepth += CTString(0, " z %.3f: %.6f (ours %.6f)", fZ, fDepth, fZ > 0.0f ? (1.0f - fNear / fZ) * fScale : -1.0f);
+    }
+    strDepth += CTString(0, "; depth factor %.4f mul %.4f add %.4f", ppr.pr_fDepthBufferFactor, ppr.pr_fDepthBufferMul, ppr.pr_fDepthBufferAdd);
+    _strDepthDebug = strDepth;
+  }
+  BeginGL();
+  float afGL[16];
+  if (hl_bWorldDebug) {
+    gl::xglGetFloatv(GL_PROJECTION_MATRIX, afGL);
+    _afProjDebug[2] = afGL[0];
+    _afProjDebug[3] = afGL[10];
+    float afRange[2] = { -1, -1 };
+    GLint iFunc = 0;
+    gl::xglGetFloatv((GLenum)0x0B70, afRange); // GL_DEPTH_RANGE
+    gl::xglGetIntegerv((GLenum)0x0B74, &iFunc); // GL_DEPTH_FUNC
+    _strWorldDebug.PrintF("GL depth range %.3f..%.3f func 0x%X; ours %.3f..%.3f, near %.4f far %.1f, ratios %.1f %.1f, box %.0f %.0f %.0f %.0f, centre %.0f %.0f",
+      afRange[0], afRange[1], iFunc, ppr.pr_fDepthBufferNear, ppr.pr_fDepthBufferFar, ppr.pr_NearClipDistance, ppr.pr_FarClipDistance,
+      vRatio(1), vRatio(2), ppr.pr_ScreenBBox.Min()(1), ppr.pr_ScreenBBox.Min()(2), ppr.pr_ScreenBBox.Max()(1), ppr.pr_ScreenBBox.Max()(2),
+      ppr.pr_ScreenCenter(1), ppr.pr_ScreenCenter(2));
+  }
+  gl::xglMatrixMode(GL_PROJECTION);
+  gl::xglPushMatrix();
+  gl::xglLoadIdentity();
+  gl::xglFrustum(fLeft, fRight, fBottom, fTop, fNear, fFar);
+  if (hl_bWorldDebug) {
+    gl::xglGetFloatv(GL_PROJECTION_MATRIX, afGL);
+    _afProjDebug[0] = afGL[0];
+    _afProjDebug[1] = afGL[10];
+  }
+  gl::xglMatrixMode(GL_TEXTURE);
+  gl::xglPushMatrix();
+  gl::xglLoadIdentity();
+  gl::xglMatrixMode(GL_MODELVIEW);
+  gl::xglPushMatrix();
+  gl::xglLoadIdentity();
+  gl::xglViewport(pdp->dp_MinI, pdp->dp_Raster->ra_Height - (pdp->dp_MinJ + pdp->dp_Height), pdp->dp_Width, pdp->dp_Height);
+  gl::xglDisable(GL_FOG);
+  gl::xglDisable(GL_LIGHTING);
+  gl::xglDisable(GL_CULL_FACE);
+  gl::xglDisable(GL_STENCIL_TEST);
+  gl::xglDisable(GL_SCISSOR_TEST);
+  gl::xglDisable(GL_CLIP_PLANE0);
+  gl::xglDisable(GL_TEXTURE_GEN_S);
+  gl::xglDisable(GL_TEXTURE_GEN_T);
+  gl::xglEnable(GL_DEPTH_TEST);
+  gl::xglDepthFunc(GL_LEQUAL);
+  // (a level with a background - the sky drawn first, behind - has its world in the first 0.9 of the depth: read back,
+  // Sam's depth there is 0.9 x (1 - near / z))
+  const FLOAT fWorldDepth = (IWorld::GetWorld() != NULL && IWorld::GetWorld()->GetBackgroundViewer() != NULL) ? 0.9f : 1.0f;
+  gl::xglDepthRange(ppr.pr_fDepthBufferNear * fWorldDepth, ppr.pr_fDepthBufferFar * fWorldDepth);
+  gl::xglColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
+  gl::xglPolygonMode(GL_FRONT_AND_BACK, GL_FILL);
+  gl::xglShadeModel(GL_SMOOTH);
+  gl::xglEnable(GL_TEXTURE_2D);
+  gl::xglTexEnvi(GL_TEXTURE_ENV, GL_TEXTURE_ENV_MODE, GL_MODULATE);
+
+  static Mat34 amBones[MAX_BONES];
+  // (a light from above, a little aside)
+  FLOAT3D vLightWorld(0.3f, -1.0f, -0.2f);
+  vLightWorld /= vLightWorld.Length();
+  const FLOAT3D vLightEye = vLightWorld * mToEye;
+  for (INDEX i = 0; i < ctPlaced; i++) {
+    const Placed &pl = aPlaced[i];
+    Model *pm = Load(pl.strModel);
+    if (pm == NULL || pm->bBroken) continue;
+    const StudioHeader *ph = pm->Header();
+    if (pl.iSeq < 0 || pl.iSeq >= ph->numseq) continue;
+    const StudioSeq &seq = pm->At<StudioSeq>(ph->seqindex)[pl.iSeq];
+    float fFrame = seq.numframes > 1 ? pl.fFrame : 0.0f;
+    if (seq.numframes > 1) fFrame = (seq.flags & STUDIO_LOOPING) ? fmodf(fFrame, (float)(seq.numframes - 1)) : Min(fFrame, seq.numframes - 1.001f);
+    BoneTransforms(*pm, pl.iSeq, Max(fFrame, 0.0f), amBones);
+    MakeTextures(*pm);
+    // model space (units: x ahead, y left, z up) -> Sam's world (metres) -> the eye's
+    const FLOAT3D avAxes[3] = { pl.vAhead * pl.fUnit, pl.vLeft * pl.fUnit, pl.vUp * pl.fUnit };
+    Mat34 mToEyeHere;
+    for (INDEX c = 0; c < 3; c++) {
+      const FLOAT3D vEye = avAxes[c] * mToEye;
+      for (INDEX r = 0; r < 3; r++) mToEyeHere[r][c] = vEye(r + 1);
+    }
+    const FLOAT3D vPosEye = (pl.vPos - vViewer) * mToEye;
+    if (i == 0 && hl_bWorldDebug) {
+      _strPlacedDebug.PrintF("viewer %.2f %.2f %.2f (%.1f %.1f %.1f), first at %.2f %.2f %.2f, in the eye %.2f %.2f %.2f",
+        vViewer(1), vViewer(2), vViewer(3), ppr.pr_ViewerPlacement.pl_OrientationAngle(1), ppr.pr_ViewerPlacement.pl_OrientationAngle(2),
+        ppr.pr_ViewerPlacement.pl_OrientationAngle(3), pl.vPos(1), pl.vPos(2), pl.vPos(3), vPosEye(1), vPosEye(2), vPosEye(3));
+    }
+    for (INDEX r = 0; r < 3; r++) mToEyeHere[r][3] = vPosEye(r + 1);
+    Meshes(*pm, amBones, pl.iBody, mToEyeHere, vLightEye, pl.fLight * 0.6f, pl.fLight * 0.5f);
+    _ctWorldDrawn++;
+  }
+  // beams: a sprite's strip from one end to the other, turned to face the eye, added; scrolling along
+  gl::xglDisable(GL_ALPHA_TEST);
+  gl::xglEnable(GL_BLEND);
+  gl::xglBlendFunc(GL_ONE, GL_ONE);
+  gl::xglDepthMask(GL_FALSE);
+  for (INDEX b = 0; b < ctBeams; b++) {
+    const Beam &be = aBeams[b];
+    sprite::Sprite *ps = sprite::Load(be.strSprite);
+    if (ps == NULL || ps->bBroken || ps->aFrames.empty() || !sprite::Bind(ps, 0)) continue;
+    const FLOAT3D v0 = (be.vFrom - vViewer) * mToEye, v1 = (be.vTo - vViewer) * mToEye;
+    FLOAT3D vAlong = v1 - v0;
+    const FLOAT fLength = vAlong.Length();
+    if (fLength < 0.001f) continue;
+    vAlong /= fLength;
+    // (across: square to the beam and to the eye's line to its middle)
+    const FLOAT3D vMid = (v0 + v1) * 0.5f;
+    FLOAT3D vAcross = vAlong * vMid;
+    if (vAcross.Length() < 0.0001f) continue;
+    vAcross.Normalize();
+    vAcross *= be.fWidth * 0.5f;
+    // (the sprite across the beam, as Half-Life's beams: u from one side to the other; stretched along it)
+    const sprite::Frame &fr = ps->aFrames[0];
+    const float u1 = (float)fr.iW / fr.iW2, v1t = (float)fr.iH / fr.iH2;
+    gl::xglColor4f(be.fR, be.fG, be.fB, 1.0f);
+    gl::xglBegin(GL_QUADS);
+    gl::xglTexCoord2f(0.0f, 0.0f);
+    gl::xglVertex3f(v0(1) - vAcross(1), v0(2) - vAcross(2), v0(3) - vAcross(3));
+    gl::xglTexCoord2f(u1, 0.0f);
+    gl::xglVertex3f(v0(1) + vAcross(1), v0(2) + vAcross(2), v0(3) + vAcross(3));
+    gl::xglTexCoord2f(u1, v1t);
+    gl::xglVertex3f(v1(1) + vAcross(1), v1(2) + vAcross(2), v1(3) + vAcross(3));
+    gl::xglTexCoord2f(0.0f, v1t);
+    gl::xglVertex3f(v1(1) - vAcross(1), v1(2) - vAcross(2), v1(3) - vAcross(3));
+    gl::xglEnd();
+    _ctBeamsDrawn++;
+  }
+
+  gl::xglMatrixMode(GL_PROJECTION);
+  gl::xglPopMatrix();
+  gl::xglMatrixMode(GL_TEXTURE);
+  gl::xglPopMatrix();
+  gl::xglMatrixMode(GL_MODELVIEW);
+  gl::xglPopMatrix();
+  EndGL();
 };
 
 // --- CPlayerWeapons::RenderWeaponModel (the Entities library): Half-Life's model there when there's one
@@ -726,6 +931,9 @@ CTString Status(void) {
   str.PrintF("view models %s; %d loaded; in hand %s, sequence %d (idle %d), %s, %u frames drawn, %u triangles, %u events, flashes %u drawn (last at %.1f %.1f %.1f, stage %d)",
     !_bHooked ? "unavailable" : hl_bViewModels ? "Half-Life's" : "Sam's", ctLoaded,
     _strModel == "" ? "Sam's" : _strModel.str_String, _iSeq, _iIdle, _bDrawn ? "drawn" : "not drawn", _ctFrames, _ctTris, _ctEvents, _ctFlashesDrawn, _afLastFlash[0], _afLastFlash[1], _afLastFlash[2], _iLastFlashWhy);
+  str += CTString(0, "; in the world %u models, %u beams drawn (projection ours %.4f %.4f, left there %.4f %.4f)", _ctWorldDrawn,
+    _ctBeamsDrawn, _afProjDebug[0], _afProjDebug[1], _afProjDebug[2], _afProjDebug[3]);
+  str += "; " + _strWorldDebug + "; " + _strPlacedDebug + ";" + _strDepthDebug;
   return str;
 };
 
