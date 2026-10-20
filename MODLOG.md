@@ -223,3 +223,8 @@ Route: rules rewritten in the host (pattern "guest's rules headless"), on the Se
 - 2026-10-20: the HUD's pickup history (history_resource.cpp: 12 slots up from the bottom right, 5 s, fading at
   80 a second; the gap the tallest picture yet + 5) from Sam's ammo, guns (PW_AVAILABLE bits), health and armour going
   up each tick; ammo by the Half-Life gun whose "ammo" picture it is. Screenshot TFE after cht_bGiveAll.
+52. A flying thing of the plugin's own (the crossbow's bolt) can't start CCastRay in an entity's sectors (it's far from
+    all of them), so its tick's way is cast over the whole world (NULL origin, cr_penIgnore the player): 1.5-4.5 ms a
+    ray on TSE's Ziggurrat, only while a bolt flies (6 m: one tick). InflictDirectDamage(hit, player, DMT_BULLET, 50).
+- 2026-10-20: the crossbow's bolts fly (2000 u/s, crossbow_bolt.mdl, 10 s in a wall, Half-Life's hit sounds); through
+  the scope still at once. test_weapons crossbow PASS TSE (the bolt hit the Boneman 0.05 s after it was fired).

@@ -17,6 +17,7 @@
 #include "Grenades.h"
 #include "Suit.h"
 #include "Tripmine.h"
+#include "Bolts.h"
 #include "HlMove.h"
 #include "Rules.h"
 #include "Run.h"
@@ -51,6 +52,7 @@ static void HL_Status(SHELL_FUNC_ARGS) {
   CPrintF("[SeriousHL] %s\n", grenades::Status().str_String);
   CPrintF("[SeriousHL] %s\n", suit::Status().str_String);
   CPrintF("[SeriousHL] %s\n", tripmine::Status().str_String);
+  CPrintF("[SeriousHL] %s\n", bolts::Status().str_String);
   CEntity *pen = player::Local();
   const FLOAT *pfArmor = pen != NULL ? (FLOAT *)player::Prop(pen, player::PROP_ARMOR) : NULL;
   if (pen != NULL) CPrintF("[SeriousHL] health %.1f, armour %.1f\n", ((CLiveEntity *)pen)->en_fHealth, pfArmor != NULL ? *pfArmor : 0.0f);
@@ -552,6 +554,7 @@ static void HL_OnStep(void) {
   flashlight::Tick(pen);
   grenades::Tick();
   tripmine::Tick(pen);
+  bolts::Tick(pen);
   suit::Tick(pen);
   weapons::Pickups(pen);
 #endif
@@ -587,6 +590,7 @@ static void HL_OnRenderView(CWorld &wo, CEntity *penViewer, CAnyProjection3D &ap
   aBeams.clear();
   aGlows.clear();
   tripmine::Collect(aPlaced, aBeams);
+  bolts::Collect(aPlaced);
   weapons::CollectWorld(player::Local(), aBeams, aGlows);
   viewmodel::DrawWorld(apr, pdp, aPlaced.empty() ? NULL : &aPlaced[0], (INDEX)aPlaced.size(), aBeams.empty() ? NULL : &aBeams[0],
     (INDEX)aBeams.size(), aGlows.empty() ? NULL : &aGlows[0], (INDEX)aGlows.size());
@@ -609,6 +613,7 @@ static void HL_OnWorldLoad(CWorld *pwo, const CTFileName &fnmWorld) {
   flashlight::Release();
   grenades::Release();
   tripmine::Release();
+  bolts::Release();
   suit::Release();
   hud::ClearHistory();
 #endif
@@ -622,6 +627,7 @@ static void HL_OnGameStop(void) {
   flashlight::Release();
   grenades::Release();
   tripmine::Release();
+  bolts::Release();
   suit::Release();
   hud::ClearHistory();
 #endif

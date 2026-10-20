@@ -167,7 +167,10 @@ function Install-HalfLifeAssets([string]$Dir, [string]$Valve) {
   $models = Join-Path $Dir 'Models\SeriousHL'
   New-Item -ItemType Directory -Force -Path $models | Out-Null
   $m = 0
-  foreach ($f in Get-ChildItem (Join-Path $Valve 'models') -Filter 'v_*.mdl' -ErrorAction SilentlyContinue) {
+  # (and the crossbow's bolt in flight)
+  $mdls = @(Get-ChildItem (Join-Path $Valve 'models') -Filter 'v_*.mdl' -ErrorAction SilentlyContinue)
+  $mdls += @(Get-ChildItem (Join-Path $Valve 'models') -Filter 'crossbow_bolt.mdl' -ErrorAction SilentlyContinue)
+  foreach ($f in $mdls) {
     Copy-Item -LiteralPath $f.FullName -Destination (Join-Path $models $f.Name) -Force
     $m++
   }

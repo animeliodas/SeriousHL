@@ -6,6 +6,7 @@
 #include "Sounds.h"
 #include "Grenades.h"
 #include "Tripmine.h"
+#include "Bolts.h"
 #include "Hud.h"
 #include "HlMove.h"
 #include "Movement.h"
@@ -960,10 +961,15 @@ static void Filter(CEntity *pen, CPlayerAction &pa) {
     }
     break;
   case G_CROSSBOW:
-    // a bolt (Sam's sniper bullet), 0.75 s apart, 5 in the clip; through the scope from the middle of the view
+    // a bolt, 0.75 s apart, 5 in the clip: flying (Bolts.h) - through the scope Sam's sniper bullet from the middle of
+    // the view at once, as single player's FireSniperBolt
     if (bFire && Due(tmNow, gs.tmNext) && gs.iClip > 0) {
       const BOOL bScope = player::PropIndex(pw, PW_SNIPING, 0) != 0;
-      if (_pFireSniperBullet != NULL) {
+      if (!bScope) {
+        bolts::Fire(pen, Eyes(pen) + ((CMovableEntity *)pen)->en_vGravityDir * (2.0f * Unit()), Forward(pen));
+        _ctShots++;
+        _fLastDamage = DMG_XBOW;
+      } else if (_pFireSniperBullet != NULL) {
         (pw->*_pFireSniperBullet)(bScope ? 0.0f : FireX(iSam), bScope ? 0.0f : FireY(iSam), 8192.0f * Unit(), DMG_XBOW, 0.0f);
         _ctShots++;
         _fLastDamage = DMG_XBOW;
