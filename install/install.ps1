@@ -160,6 +160,15 @@ function Install-HalfLifeAssets([string]$Dir, [string]$Valve) {
     }
   }
   Write-Host "  $n sounds from Half-Life ($Valve) -> $root"
+  # the guns in your hands (view models): copied as they are
+  $models = Join-Path $Dir 'Models\SeriousHL'
+  New-Item -ItemType Directory -Force -Path $models | Out-Null
+  $m = 0
+  foreach ($f in Get-ChildItem (Join-Path $Valve 'models') -Filter 'v_*.mdl' -ErrorAction SilentlyContinue) {
+    Copy-Item -LiteralPath $f.FullName -Destination (Join-Path $models $f.Name) -Force
+    $m++
+  }
+  Write-Host "  $m view models from Half-Life -> $models"
 }
 
 function New-Shortcut([string]$Dir, [string]$Kind) {

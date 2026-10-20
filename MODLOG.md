@@ -150,3 +150,16 @@ Route: rules rewritten in the host (pattern "guest's rules headless"), on the Se
 - 2026-10-16: Half-Life's swimming (the speedrun build too): water levels, PM_WaterMove, the jump up, the water jump,
   no fall damage into water. `test_water.py` 6/6 TFE (Karnak) and TSE (Ziggurrat; the water jump in Palenque);
   `test_hl.py` 11/11 TFE and TSE.
+38. View models: `CPlayerWeapons::RenderWeaponModel` (Entities, exported in TFE and TSE: `...KKHJ@Z`, the 7-argument one;
+    TFE's 6-argument one just calls it) is where Sam draws his gun - after the world, before the HUD. Patched: Half-Life's
+    v_*.mdl drawn there instead (Studio version 10, read as the SDK's studio.h; StudioCalcRotations' runs of animation
+    values, Euler angles to quaternions, slerp; the SDK's weapon animation numbers). Half-Life's model space (x ahead,
+    y left, z up) to the eye's: (-y, z, -x); vertical field of view 73.74 degrees (90 at 4:3), depth range 0..0.1 as Sam's
+    weapon.
+39. The engine's own GL types (gl_types.h: GLenum is an enum) clash with the Windows SDK's GL/gl.h, and its GL pointers
+    (pglBegin...) aren't exported: the plugin loads its own from opengl32.dll (GetProcAddress) and uses the engine's
+    enums. All the GL state is pushed and popped; texture units above 0 off while drawing.
+40. Screenshots of the game for checks: `um win shot --exe SeriousSam_Custom.exe out.png --scale 0.5` (gfxcapture).
+- 2026-10-20: Half-Life's view models with their animations (draw, idle, fire, reload, holster; gauss spin, egon
+  beam, satchel radio). Seen in TFE and TSE (`tools/view_shots.py`): .357, crowbar, Glock, MP5, shotgun, gauss, egon,
+  crossbow, satchel.

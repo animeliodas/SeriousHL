@@ -2,6 +2,7 @@
 #include "StdH.h"
 #include "Weapons.h"
 #include "Hev.h"
+#include "ViewModel.h"
 #include "HlMove.h"
 #include "Movement.h"
 #include "Player.h"
@@ -110,6 +111,47 @@ static BOOL _bEgonOn = FALSE;     // egon
 static TIME _tmEgonPulse = 0, _tmEgonRun = 0;
 static ULONG _aulSatchels[16];    // satchels out (Sam's grenades, their ids)
 static INDEX _ctSatchels = 0;
+
+// --- Half-Life's view models (ViewModel.h): the file, and the SDK's weapon animation numbers (draw, idle, holster)
+struct ViewGun { const char *strModel; INDEX iDraw, iIdle, iHolster; };
+static const ViewGun _aView[G_COUNT] = {
+  { NULL, 0, 0, -1 },
+  { "v_crowbar.mdl", 1, 0, 2 },     // CROWBAR_DRAW, _IDLE, _HOLSTER
+  { "v_357.mdl", 5, 0, 4 },         // PYTHON_DRAW, _IDLE1, _HOLSTER
+  { "v_9mmhandgun.mdl", 7, 0, 8 },  // GLOCK_DRAW, _IDLE1, _HOLSTER
+  { "v_shotgun.mdl", 6, 0, 7 },     // SHOTGUN_DRAW, _IDLE, _HOLSTER
+  { "v_9mmar.mdl", 4, 1, -1 },      // MP5_DEPLOY, _IDLE1
+  { "v_rpg.mdl", 5, 0, 4 },         // RPG_DRAW1, _IDLE, _HOLSTER1
+  { "v_grenade.mdl", 7, 0, 6 },     // HANDGRENADE_DRAW, _IDLE, _HOLSTER
+  { "v_gauss.mdl", 8, 0, 7 },       // GAUSS_DRAW, _IDLE, _HOLSTER
+  { "v_egon.mdl", 9, 0, 10 },       // EGON_DRAW, _IDLE1, _HOLSTER
+  { "v_satchel.mdl", 2, 0, -1 },    // SATCHEL_DRAW, _IDLE1 (the radio's once some are out)
+  { "v_crossbow.mdl", 8, 0, 10 },   // CROSSBOW_DRAW1, _IDLE1, _HOLSTER1
+};
+static Gun _gView = G_NONE;
+static BOOL _bHolstered = FALSE, _bRadio = FALSE;
+static INDEX _iSwing = 0;
+
+static void ViewTake(Gun g) {
+  if (g == _gView && !_bHolstered) return;
+  _gView = g;
+  _bHolstered = FALSE;
+  _bRadio = FALSE;
+  viewmodel::SetModel(NULL, 0, 0);
+  if (g != G_NONE && _aView[g].strModel != NULL) viewmodel::SetModel(_aView[g].strModel, _aView[g].iDraw, _aView[g].iIdle);
+};
+
+static void ViewHolster(void) {
+  if (_bHolstered || _gView == G_NONE) return;
+  _bHolstered = TRUE;
+  const INDEX iHolster = _aView[_gView].iHolster;
+  if (iHolster >= 0) {
+    viewmodel::SetIdle(iHolster);
+    viewmodel::Play(iHolster);
+  }
+};
+
+static void View(INDEX iSeq) { viewmodel::Play(iSeq); };
 static ULONG _ctShots = 0;
 static FLOAT _fLastDamage = 0;
 static const char *_strLast = "";
@@ -281,6 +323,10 @@ static void EgonOff(CEntity *pen, CEntity *pw) {
   if (!_bEgonOn) return;
   _bEgonOn = FALSE;
   Sound(pen, pw, "weapons\\egon_off1.wav", SND_MINIGUN_SPINDOWN, TRUE);
+  if (_gView == G_EGON) {
+    viewmodel::SetIdle(0);
+    View(4); // EGON_ALTFIREOFF
+  }
   Log("off", G_EGON, 0, -1);
 };
 
@@ -361,6 +407,15 @@ static void StartReload(CEntity *pen, CEntity *pw, Gun g, GunState &gs, TIME tmN
   else if (g == G_GLOCK) Sound(pen, pw, "items\\9mmclip1.wav", SND_COLT_RELOAD, TRUE);
   else if (g == G_MP5) Sound(pen, pw, "items\\clipinsert1.wav", -1, TRUE);
   else if (g == G_CROSSBOW) Sound(pen, pw, "weapons\\xbow_reload1.wav", -1, TRUE);
+  // PYTHON_RELOAD, GLOCK_RELOAD / _RELOAD_NOT_EMPTY, SHOTGUN_RELOAD (a shell), MP5_RELOAD, RPG_RELOAD, CROSSBOW_RELOAD
+  switch (g) {
+    case G_PYTHON: View(3); break;
+    case G_GLOCK: View(gs.iClip == 0 ? 5 : 6); break;
+    case G_SHOTGUN: View(3); break;
+    case G_MP5: View(3); break;
+    case G_RPG: View(2); break;
+    case G_CROSSBOW: View(7); break;
+  }
   Log("reload", g, gs.iClip, piReserve != NULL ? *piReserve : -1);
 };
 
@@ -382,6 +437,7 @@ static void Filter(CEntity *pen, CPlayerAction &pa) {
   if (pw == NULL) return;
   if (!hl_bWeapons || !(pen->GetFlags() & ENF_ALIVE)) {
     EgonOff(pen, pw);
+    ViewTake(G_NONE);
     return;
   }
   const INDEX iSam = player::PropIndex(pw, PW_CURRENT, 0);
@@ -393,6 +449,7 @@ static void Filter(CEntity *pen, CPlayerAction &pa) {
     _iLastSam = iSam;
     _bCharging = FALSE;
     EgonOff(pen, pw);
+    ViewTake(G_NONE);
     return;
   }
   // Sam's own firing and reloading are out; the right mouse button doesn't open Netricsa
@@ -409,8 +466,10 @@ static void Filter(CEntity *pen, CPlayerAction &pa) {
     _bCharging = FALSE;
     _bPinPulled = FALSE;
     EgonOff(pen, pw);
+    ViewHolster();
     return;
   }
+  ViewTake(g);
   if (iSam != _iLastSam) {
     _iLastSam = iSam;
     gs.tmNext = Max(gs.tmNext, tmNow + 0.5f);
@@ -440,6 +499,10 @@ static void Filter(CEntity *pen, CPlayerAction &pa) {
       Sound(pen, pw, bHit ? "weapons\\cbar_hitbod1.wav|weapons\\cbar_hitbod2.wav|weapons\\cbar_hitbod3.wav" : "weapons\\cbar_miss1.wav",
         bHit ? SND_KNIFE_HIGH : SND_KNIFE_LONG, FALSE);
       Anim(pw, "Attack1,Attack01,Attack");
+      // CROWBAR_ATTACK1HIT, _ATTACK2HIT, _ATTACK3HIT; the misses: _ATTACK1MISS, _ATTACK2MISS, _ATTACK3MISS
+      static const INDEX aiHit[3] = { 3, 6, 8 }, aiMiss[3] = { 4, 5, 7 };
+      View(bHit ? aiHit[_iSwing % 3] : aiMiss[_iSwing % 3]);
+      _iSwing++;
       _ctShots++;
       _fLastDamage = bHit ? DMG_CROWBAR : 0.0f;
       Log(bHit ? "hit" : "swing", g, 0, -1);
@@ -452,6 +515,7 @@ static void Filter(CEntity *pen, CPlayerAction &pa) {
       gs.tmNext = tmNow + 0.75f;
       Sound(pen, pw, "weapons\\357_shot1.wav|weapons\\357_shot2.wav", SND_COLT_FIRE, FALSE);
       Anim(pw, "Fire1,Fire");
+      View(2); // PYTHON_FIRE1
       Flash(pw);
       Noise(pw, 50.0f);
       Log("fire", g, gs.iClip, iReserve);
@@ -466,6 +530,7 @@ static void Filter(CEntity *pen, CPlayerAction &pa) {
       gs.tmNext = tmNow + (bFire ? 0.3f : 0.2f);
       Sound(pen, pw, "weapons\\pl_gun3.wav", SND_COLT_FIRE, FALSE);
       Anim(pw, "FireRight,Fire1,Fire");
+      View(gs.iClip == 0 ? 4 : 3); // GLOCK_SHOOT_EMPTY, GLOCK_SHOOT
       Flash(pw);
       Noise(pw, 40.0f);
       Log("fire", g, gs.iClip, iReserve);
@@ -478,6 +543,7 @@ static void Filter(CEntity *pen, CPlayerAction &pa) {
       gs.tmNext = tmNow + 1.5f;
       Sound(pen, pw, "weapons\\dbarrel1.wav", SND_DOUBLESHOTGUN_FIRE, FALSE);
       Anim(pw, "Fire1,Fire,Fire1Fast");
+      View(2); // SHOTGUN_FIRE2
       Flash(pw);
       Noise(pw, 60.0f);
       Log("double", g, gs.iClip, iReserve);
@@ -487,6 +553,7 @@ static void Filter(CEntity *pen, CPlayerAction &pa) {
       gs.tmNext = tmNow + 0.75f;
       Sound(pen, pw, "weapons\\sbarrel1.wav", SND_SHOTGUN_FIRE, FALSE);
       Anim(pw, "Fire1,Fire,Fire1Fast");
+      View(1); // SHOTGUN_FIRE
       Flash(pw);
       Noise(pw, 60.0f);
       Log("fire", g, gs.iClip, iReserve);
@@ -501,6 +568,7 @@ static void Filter(CEntity *pen, CPlayerAction &pa) {
         (*piGrenades)--;
         gs.tmNext = tmNow + 1.0f;
         Sound(pen, pw, "weapons\\glauncher.wav|weapons\\glauncher2.wav", SND_GRENADE_FIRE, FALSE);
+        View(2); // MP5_LAUNCH
         _ctShots++;
         Log("grenade", g, gs.iClip, *piGrenades);
       }
@@ -510,6 +578,7 @@ static void Filter(CEntity *pen, CPlayerAction &pa) {
       gs.tmNext = tmNow + 0.1f;
       Sound(pen, pw, "weapons\\hks1.wav|weapons\\hks2.wav|weapons\\hks3.wav", SND_TOMMYGUN_FIRE, FALSE);
       Anim(pw, "Fire");
+      View(5 + pw->IRnd() % 3); // MP5_FIRE1..3
       Flash(pw);
       Noise(pw, 50.0f);
       if ((gs.iClip % 10) == 0) Log("fire", g, gs.iClip, iReserve);
@@ -522,6 +591,7 @@ static void Filter(CEntity *pen, CPlayerAction &pa) {
       gs.tmNext = tmNow + 1.5f;
       Sound(pen, pw, "weapons\\rocketfire1.wav", SND_ROCKET_FIRE, FALSE);
       Anim(pw, "Fire");
+      View(3); // RPG_FIRE2
       Noise(pw, 60.0f);
       _ctShots++;
       Log("fire", g, gs.iClip, iReserve);
@@ -531,6 +601,7 @@ static void Filter(CEntity *pen, CPlayerAction &pa) {
     // the pin comes out on the press, it flies on the release
     if (bFire && !_bPinPulled && Due(tmNow, gs.tmNext) && iReserve > 0) {
       _bPinPulled = TRUE;
+      View(2); // HANDGRENADE_PINPULL
     } else if (!bFire && _bPinPulled && _pFireGrenade != NULL) {
       _bPinPulled = FALSE;
       (pw->*_pFireGrenade)(0);
@@ -538,6 +609,7 @@ static void Filter(CEntity *pen, CPlayerAction &pa) {
       gs.tmNext = tmNow + 0.5f;
       Sound(pen, pw, NULL, SND_GRENADE_FIRE, FALSE);
       Anim(pw, "Fire");
+      View(3); // HANDGRENADE_THROW1
       _ctShots++;
       Log("throw", g, 0, piReserve != NULL ? *piReserve : -1);
     }
@@ -553,6 +625,8 @@ static void Filter(CEntity *pen, CPlayerAction &pa) {
       if (tmCharged >= 10.0f) {
         _bCharging = FALSE;
         hev::SelfDamage(pen, 50.0f);
+        viewmodel::SetIdle(0);
+        View(0);
         gs.tmNext = tmNow + 1.0f;
         Log("overcharge", g, 0, iReserve);
       } else if (!bAlt) {
@@ -568,6 +642,8 @@ static void Filter(CEntity *pen, CPlayerAction &pa) {
         gs.tmNext = tmNow + 1.0f;
         Sound(pen, pw, "weapons\\gauss2.wav", SND_LASER_FIRE, FALSE);
         Anim(pw, "Fire");
+        viewmodel::SetIdle(0);
+        View(5); // GAUSS_FIRE
         Flash(pw);
         Noise(pw, 60.0f);
         CPrintF(SB_TAG " gauss charged %.2f s: %.0f damage, pushed back %.0f u/s\n", tmCharged, fDamage, vPush.Length() / Unit());
@@ -576,6 +652,8 @@ static void Filter(CEntity *pen, CPlayerAction &pa) {
     } else if (bAlt && Due(tmNow, gs.tmNext) && iReserve > 0) {
       _bCharging = TRUE;
       _tmChargeStart = tmNow;
+      viewmodel::SetIdle(4); // GAUSS_SPIN, after GAUSS_SPINUP
+      View(3);
       _tmChargeDrain = tmNow;
     } else if (bFire && Due(tmNow, gs.tmNext) && iReserve >= 2) {
       Bullet(pw, iSam, 8192.0f, DMG_GAUSS, 0.0f);
@@ -583,6 +661,7 @@ static void Filter(CEntity *pen, CPlayerAction &pa) {
       gs.tmNext = tmNow + 0.2f;
       Sound(pen, pw, "weapons\\gauss2.wav", SND_LASER_FIRE, FALSE);
       Anim(pw, "Fire");
+      View(6); // GAUSS_FIRE2
       Flash(pw);
       Noise(pw, 50.0f);
       Log("fire", g, 0, *piReserve);
@@ -596,6 +675,8 @@ static void Filter(CEntity *pen, CPlayerAction &pa) {
         _tmEgonPulse = tmNow + 0.1f;
         _tmEgonRun = tmNow + 2.0f;
         Sound(pen, pw, "weapons\\egon_windup2.wav", SND_MINIGUN_SPINUP, TRUE);
+        viewmodel::SetIdle(3); // EGON_ALTFIRECYCLE, after EGON_ALTFIREON
+        View(2);
         Log("on", g, 0, iReserve);
       }
       if (Due(tmNow, _tmEgonPulse)) {
@@ -615,8 +696,14 @@ static void Filter(CEntity *pen, CPlayerAction &pa) {
   case G_SATCHEL: {
     // the first fire throws one, or sets off those out; the second throws another
     const INDEX ctOut = Satchels();
+    // the radio in hand while some are out (SATCHEL_RADIO_DRAW), the satchel again when none are (SATCHEL_DRAW)
+    if ((ctOut > 0) != _bRadio && Due(tmNow, gs.tmNext)) {
+      _bRadio = ctOut > 0;
+      viewmodel::SetModel(_bRadio ? "v_satchel_radio.mdl" : "v_satchel.mdl", 2, 0);
+    }
     if (bFire && ctOut > 0 && Due(tmNow, gs.tmNext)) {
       Detonate();
+      View(3); // SATCHEL_RADIO_FIRE
       gs.tmNext = tmNow + 0.5f;
       _ctShots++;
       _fLastDamage = DMG_SATCHEL;
@@ -625,6 +712,7 @@ static void Filter(CEntity *pen, CPlayerAction &pa) {
       if (piReserve != NULL) (*piReserve)--;
       gs.tmNext = tmNow + 1.0f;
       Anim(pw, "Fire");
+      if (!_bRadio) View(3); // SATCHEL_DROP
       Log("throw", g, _ctSatchels, piReserve != NULL ? *piReserve : -1);
     }
     } break;
@@ -643,6 +731,7 @@ static void Filter(CEntity *pen, CPlayerAction &pa) {
       gs.tmNext = tmNow + 0.75f;
       Sound(pen, pw, "weapons\\xbow_fire1.wav", SND_SNIPER_FIRE, FALSE);
       Anim(pw, "Fire");
+      View(gs.iClip == 0 ? 6 : 4); // CROSSBOW_FIRE3 (the last), CROSSBOW_FIRE1
       Noise(pw, 30.0f);
       Log("fire", g, gs.iClip, iReserve);
     }
@@ -689,6 +778,9 @@ void Reset(void) {
   _bOldFire = _bOldAlt = FALSE;
   _bEgonOn = FALSE;
   _ctSatchels = 0;
+  _gView = G_NONE;
+  _bHolstered = _bRadio = FALSE;
+  viewmodel::SetModel(NULL, 0, 0);
 };
 
 void Draw(CDrawPort *pdp, CEntity *pen) {
